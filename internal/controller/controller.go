@@ -11,6 +11,8 @@ import (
 	"runp/internal/process"
 )
 
+const controllerEventBuffer = 64
+
 type ProcessSnapshot struct {
 	Name      string
 	DependsOn []string
@@ -63,7 +65,7 @@ func New(cfg config.Config, manager *process.Manager) (*Controller, error) {
 		processes:   processes,
 		runtime:     make(map[process.Key]process.Snapshot),
 		restore:     make(map[process.Key]map[string]struct{}),
-		events:      make(chan Event, 64),
+		events:      make(chan Event, controllerEventBuffer),
 		eventNotify: make(chan struct{}, 1),
 		eventDone:   make(chan struct{}),
 	}

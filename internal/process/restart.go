@@ -13,10 +13,10 @@ type RestartTracker struct {
 }
 
 func (t *RestartTracker) Next(cfg config.RestartConfig, policy string, expected bool, exitCode int, now time.Time) (time.Duration, bool) {
-	if expected || policy == "never" || policy == "on-failure" && exitCode == 0 {
+	if expected || policy == config.RestartNever || policy == config.RestartOnFailure && exitCode == 0 {
 		return 0, false
 	}
-	if policy != "always" && policy != "on-failure" {
+	if policy != config.RestartAlways && policy != config.RestartOnFailure {
 		return 0, false
 	}
 

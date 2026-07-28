@@ -14,6 +14,13 @@ import (
 
 const maxRecordBytes = 1 << 20
 
+const (
+	defaultBatchInterval = 50 * time.Millisecond
+	storeEventBuffer     = 64
+	logDirectoryMode     = 0o700
+	bytesPerMegabyte     = 1 << 20
+)
+
 type Stream string
 
 const (
@@ -111,7 +118,7 @@ type Handle struct {
 
 func New(root string, batchEvery time.Duration) *Store {
 	if batchEvery <= 0 {
-		batchEvery = 50 * time.Millisecond
+		batchEvery = defaultBatchInterval
 	}
 	store := &Store{
 		root:       root,
@@ -119,7 +126,7 @@ func New(root string, batchEvery time.Duration) *Store {
 		entries:    make(map[processKey]*entry),
 		handles:    make(map[*Handle]struct{}),
 		pending:    make(map[processKey]Event),
-		events:     make(chan Event, 64),
+		events:     make(chan Event, storeEventBuffer),
 		stop:       make(chan struct{}),
 		done:       make(chan struct{}),
 	}
@@ -137,10 +144,10 @@ func (s *Store) Open(project, process string, cfg config.LogConfig) (*Handle, er
 	}
 	key := processKey{project: project, process: process}
 	path := filepath.Join(s.root, config.SafeName(project), config.SafeName(process)+".log")
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), logDirectoryMode); err != nil {
 		return nil, err
 	}
-	sink, err := newRotatingWriter(path, int64(cfg.MaxSizeMB)<<20, cfg.MaxFiles)
+	sink, err := newRotatingWriter(path, int64(cfg.MaxSizeMB)*bytesPerMegabyte, cfg.MaxFiles)
 	if err != nil {
 		return nil, err
 	}

@@ -19,11 +19,11 @@ func renderDashboard(snapshot controller.Snapshot, projectIndex, processIndex, w
 		return content.String()
 	}
 
-	cardWidth := width - 4
+	cardWidth := width - dashboardHorizontalInset
 	columns := 1
-	if width >= 90 {
+	if width >= wideDashboardBreakpoint {
 		columns = 2
-		cardWidth = (width - 6) / 2
+		cardWidth = (width - dashboardTwoColumnInset) / 2
 	}
 	cards := make([]string, 0, len(snapshot.Projects))
 	for index, project := range snapshot.Projects {
@@ -45,11 +45,11 @@ func renderDashboard(snapshot controller.Snapshot, projectIndex, processIndex, w
 		if index == projectIndex {
 			style = selectedCardStyle
 		}
-		cards = append(cards, style.Width(max(1, cardWidth-4)).Render(strings.TrimSuffix(body.String(), "\n")))
+		cards = append(cards, style.Width(max(1, cardWidth-cardFrameWidth)).Render(strings.TrimSuffix(body.String(), "\n")))
 	}
 	for index := 0; index < len(cards); index += columns {
 		if columns == 2 && index+1 < len(cards) {
-			content.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, cards[index], "  ", cards[index+1]))
+			content.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, cards[index], strings.Repeat(" ", panelGap), cards[index+1]))
 		} else {
 			content.WriteString(cards[index])
 		}
@@ -74,7 +74,7 @@ func renderState(state process.State) string {
 }
 
 func footer(width int) string {
-	if width < 70 {
+	if width < compactFooterBreakpoint {
 		return "↑↓ project  ←→ process  s start  k stop  q quit"
 	}
 	return fmt.Sprintf("%-14s %-14s %-14s %-14s", "↑/↓ project", "←/→ process", "s start", "k stop") + "r restart  q quit"

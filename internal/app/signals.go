@@ -12,13 +12,18 @@ import (
 	"runp/internal/tui"
 )
 
+const (
+	signalBuffer         = 2
+	forceShutdownTimeout = 5 * time.Second
+)
+
 type signalProgram interface {
 	Send(tea.Msg)
 	Kill()
 }
 
 func handleSignals(program *tea.Program, control *controller.Controller) func() {
-	signals := make(chan os.Signal, 2)
+	signals := make(chan os.Signal, signalBuffer)
 	stopNotify := notifySignals(signals)
 	stopLifecycle := handleSignalChannel(signals, program, control.Shutdown, control.ForceShutdown)
 	return func() {
@@ -40,7 +45,7 @@ func handleSignalChannel(signals <-chan os.Signal, program signalProgram, gracef
 		}
 		select {
 		case <-signals:
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), forceShutdownTimeout)
 			_ = force(ctx)
 			cancel()
 			program.Kill()

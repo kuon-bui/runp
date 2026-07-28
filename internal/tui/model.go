@@ -74,7 +74,7 @@ type operationDoneMsg struct {
 }
 
 func New(services Services) Model {
-	model := Model{services: services, width: 80, height: 24}
+	model := Model{services: services, width: defaultTerminalWidth, height: defaultTerminalHeight}
 	model.refresh()
 	return model
 }

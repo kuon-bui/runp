@@ -16,6 +16,34 @@ import (
 
 type Duration time.Duration
 
+const (
+	currentVersion = 1
+
+	HealthProcess = "process"
+	HealthHTTP    = "http"
+	HealthTCP     = "tcp"
+
+	RestartNever     = "never"
+	RestartOnFailure = "on-failure"
+	RestartAlways    = "always"
+
+	defaultStopTimeout  = 5 * time.Second
+	defaultLogMaxSizeMB = 10
+	defaultLogMaxFiles  = 5
+	defaultLogBuffer    = 10_000
+
+	defaultRestartMaxAttempts = 5
+	defaultRestartWindow      = time.Minute
+	defaultInitialBackoff     = time.Second
+	defaultMaxBackoff         = 30 * time.Second
+
+	defaultHealthTimeout  = 30 * time.Second
+	defaultHealthInterval = 500 * time.Millisecond
+
+	minimumTCPPort = 1
+	maximumTCPPort = 65_535
+)
+
 func (d Duration) MarshalJSON() ([]byte, error) {
 	return json.Marshal(time.Duration(d).String())
 }
@@ -114,19 +142,19 @@ type ResolvedProcess struct {
 
 func Default() Config {
 	return Config{
-		Version: 1,
+		Version: currentVersion,
 		Defaults: Defaults{
-			StopTimeout: Duration(5 * time.Second),
+			StopTimeout: Duration(defaultStopTimeout),
 			Log: LogConfig{
-				MaxSizeMB:   10,
-				MaxFiles:    5,
-				BufferLines: 10000,
+				MaxSizeMB:   defaultLogMaxSizeMB,
+				MaxFiles:    defaultLogMaxFiles,
+				BufferLines: defaultLogBuffer,
 			},
 			Restart: RestartConfig{
-				MaxAttempts:    5,
-				Window:         Duration(time.Minute),
-				InitialBackoff: Duration(time.Second),
-				MaxBackoff:     Duration(30 * time.Second),
+				MaxAttempts:    defaultRestartMaxAttempts,
+				Window:         Duration(defaultRestartWindow),
+				InitialBackoff: Duration(defaultInitialBackoff),
+				MaxBackoff:     Duration(defaultMaxBackoff),
 			},
 		},
 		Projects: []Project{},
@@ -150,7 +178,7 @@ func SafeName(name string) string {
 }
 
 func (c Config) Validate() error {
-	if c.Version != 1 {
+	if c.Version != currentVersion {
 		return fmt.Errorf("version: must equal 1")
 	}
 	defaults := effectiveDefaults(c.Defaults)
@@ -260,27 +288,27 @@ func validateProject(path, root string, project Project, defaults Defaults) erro
 func validateHealth(path string, health HealthConfig) error {
 	typeName := health.Type
 	if typeName == "" {
-		typeName = "process"
+		typeName = HealthProcess
 	}
 	if health.Timeout < 0 || health.Interval < 0 {
 		return fmt.Errorf("%s: durations must be positive", path)
 	}
 	switch typeName {
-	case "process":
+	case HealthProcess:
 		return nil
-	case "http":
+	case HealthHTTP:
 		parsed, err := url.ParseRequestURI(health.URL)
 		if err != nil || parsed.Scheme != "http" && parsed.Scheme != "https" || parsed.Host == "" {
 			return fmt.Errorf("%s.url: must be a valid http or https URL", path)
 		}
 		return nil
-	case "tcp":
+	case HealthTCP:
 		_, port, err := net.SplitHostPort(health.Address)
 		if err != nil {
 			return fmt.Errorf("%s.address: must be valid host:port", path)
 		}
 		portNumber, err := strconv.Atoi(port)
-		if err != nil || portNumber < 1 || portNumber > 65535 {
+		if err != nil || portNumber < minimumTCPPort || portNumber > maximumTCPPort {
 			return fmt.Errorf("%s.address: must be valid host:port", path)
 		}
 		return nil
@@ -292,9 +320,9 @@ func validateHealth(path string, health HealthConfig) error {
 func validateRestart(path string, restart, defaults RestartConfig) error {
 	policy := restart.Policy
 	if policy == "" {
-		policy = "never"
+		policy = RestartNever
 	}
-	if policy != "never" && policy != "on-failure" && policy != "always" {
+	if policy != RestartNever && policy != RestartOnFailure && policy != RestartAlways {
 		return fmt.Errorf("%s.policy: must be never, on-failure, or always", path)
 	}
 	merged := mergeRestart(defaults, restart)
@@ -380,17 +408,17 @@ func (c Config) Resolve(projectName, processName string) (ResolvedProcess, error
 			}
 			health := process.Health
 			if health.Type == "" {
-				health.Type = "process"
+				health.Type = HealthProcess
 			}
 			if health.Timeout == 0 {
-				health.Timeout = Duration(30 * time.Second)
+				health.Timeout = Duration(defaultHealthTimeout)
 			}
 			if health.Interval == 0 {
-				health.Interval = Duration(500 * time.Millisecond)
+				health.Interval = Duration(defaultHealthInterval)
 			}
 			restart := mergeRestart(defaults.Restart, process.Restart)
 			if restart.Policy == "" {
-				restart.Policy = "never"
+				restart.Policy = RestartNever
 			}
 			stopTimeout := process.StopTimeout
 			if stopTimeout == 0 {

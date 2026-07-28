@@ -5,6 +5,8 @@ import (
 	"os"
 )
 
+const logFileMode = 0o600
+
 type rotatingWriter struct {
 	path     string
 	maxBytes int64
@@ -25,7 +27,7 @@ func newRotatingWriter(path string, maxBytes int64, maxFiles int) (*rotatingWrit
 }
 
 func (w *rotatingWriter) open() error {
-	file, err := os.OpenFile(w.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	file, err := os.OpenFile(w.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, logFileMode)
 	if err != nil {
 		return err
 	}

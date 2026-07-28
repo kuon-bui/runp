@@ -31,6 +31,11 @@ const (
 	Blocked    State = "blocked"
 )
 
+const (
+	managerEventBuffer = 64
+	unknownExitCode    = -1
+)
+
 type Snapshot struct {
 	Key          Key
 	State        State
@@ -87,7 +92,7 @@ func NewManager(logs *logstore.Store) *Manager {
 	manager := &Manager{
 		logs:        logs,
 		entries:     make(map[Key]*entry),
-		events:      make(chan Event, 64),
+		events:      make(chan Event, managerEventBuffer),
 		eventNotify: make(chan struct{}, 1),
 		eventDone:   make(chan struct{}),
 	}
@@ -236,7 +241,7 @@ func (m *Manager) failStart(current *entry, cycle *runCycle, err error) error {
 	if current.run == cycle {
 		current.snapshot.State = Failed
 		current.snapshot.PID = 0
-		current.snapshot.ExitCode = -1
+		current.snapshot.ExitCode = unknownExitCode
 		current.snapshot.Error = err.Error()
 		failed := current.snapshot
 		current.mu.Unlock()
@@ -384,7 +389,7 @@ func exitCode(err error) int {
 	if errors.As(err, &exitErr) {
 		return exitErr.ExitCode()
 	}
-	return -1
+	return unknownExitCode
 }
 
 func (m *Manager) Stop(ctx context.Context, key Key) error {

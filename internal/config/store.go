@@ -10,6 +10,11 @@ import (
 	"path/filepath"
 )
 
+const (
+	configDirectoryMode = 0o700
+	configFileMode      = 0o600
+)
+
 func DefaultPath() (string, error) {
 	root, err := os.UserConfigDir()
 	if err != nil {
@@ -69,7 +74,7 @@ func Save(path string, cfg Config) (err error) {
 	}
 	data = append(data, '\n')
 	directory := filepath.Dir(path)
-	if err := os.MkdirAll(directory, 0o700); err != nil {
+	if err := os.MkdirAll(directory, configDirectoryMode); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
 	}
 	temporary, err := os.CreateTemp(directory, ".config-*.tmp")
@@ -81,7 +86,7 @@ func Save(path string, cfg Config) (err error) {
 		_ = temporary.Close()
 		_ = os.Remove(temporaryPath)
 	}()
-	if err := temporary.Chmod(0o600); err != nil {
+	if err := temporary.Chmod(configFileMode); err != nil {
 		return fmt.Errorf("secure temporary config: %w", err)
 	}
 	if _, err := temporary.Write(data); err != nil {

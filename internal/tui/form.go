@@ -20,6 +20,17 @@ type formKind uint8
 const (
 	projectForm formKind = iota
 	processForm
+
+	fieldName          = "Name"
+	fieldDirectory     = "Directory"
+	fieldArgs          = "Args"
+	fieldEnvKey        = "EnvKey"
+	fieldEnvValue      = "EnvValue"
+	fieldHealthType    = "HealthType"
+	fieldRestartPolicy = "RestartPolicy"
+
+	toggleShell     = "Shell"
+	toggleAutostart = "Autostart"
 )
 
 type formSection uint8
@@ -155,14 +166,14 @@ func newProjectForm(cfg config.Config, projectIndex int) (*editForm, error) {
 		base:         copy,
 		projectIndex: projectIndex,
 		processIndex: -1,
-		booleans:     map[string]bool{"Autostart": project.Autostart},
-		toggles:      []formToggle{{label: "Autostart", display: "Autostart", section: basicSection}},
-		width:        80,
-		height:       24,
+		booleans:     map[string]bool{toggleAutostart: project.Autostart},
+		toggles:      []formToggle{{label: toggleAutostart, display: toggleAutostart, section: basicSection}},
+		width:        defaultTerminalWidth,
+		height:       defaultTerminalHeight,
 		creating:     creating,
 	}
-	form.addField(basicSection, "Name", "Name", project.Name)
-	form.addField(basicSection, "Directory", "Directory", project.Directory)
+	form.addField(basicSection, fieldName, fieldName, project.Name)
+	form.addField(basicSection, fieldDirectory, fieldDirectory, project.Directory)
 	form.focusFirst()
 	return form, nil
 }
@@ -191,33 +202,33 @@ func newProcessForm(cfg config.Config, projectIndex, processIndex int) (*editFor
 		base:         copy,
 		projectIndex: projectIndex,
 		processIndex: processIndex,
-		booleans:     map[string]bool{"Shell": item.Shell, "Autostart": item.Autostart},
+		booleans:     map[string]bool{toggleShell: item.Shell, toggleAutostart: item.Autostart},
 		workingEnv:   cloneMap(item.Env),
-		width:        80,
-		height:       24,
+		width:        defaultTerminalWidth,
+		height:       defaultTerminalHeight,
 		creating:     creating,
 	}
 	args := []byte("[]")
 	if item.Args != nil {
 		args, _ = json.Marshal(item.Args)
 	}
-	form.addField(basicSection, "Name", "Name", item.Name)
+	form.addField(basicSection, fieldName, fieldName, item.Name)
 	form.addField(basicSection, "Command", "Command", item.Command)
-	form.addField(basicSection, "Args", "Arguments", string(args))
-	form.addField(basicSection, "Directory", "Directory", item.Directory)
+	form.addField(basicSection, fieldArgs, "Arguments", string(args))
+	form.addField(basicSection, fieldDirectory, fieldDirectory, item.Directory)
 	form.addField(basicSection, "DependsOn", "Depends on", strings.Join(item.DependsOn, ", "))
 	form.addField(basicSection, "StopTimeout", "Stop timeout", durationString(item.StopTimeout))
-	form.addField(environmentSection, "EnvKey", "Variable", "")
-	form.addField(environmentSection, "EnvValue", "Value", "")
+	form.addField(environmentSection, fieldEnvKey, "Variable", "")
+	form.addField(environmentSection, fieldEnvValue, "Value", "")
 	form.fields[len(form.fields)-1].input.EchoMode = textinput.EchoPassword
 	form.fields[len(form.fields)-1].input.EchoCharacter = '•'
 	form.addField(environmentSection, "EnvFile", "Environment file", item.EnvFile)
-	form.addField(healthSection, "HealthType", "Health type", item.Health.Type)
+	form.addField(healthSection, fieldHealthType, "Health type", item.Health.Type)
 	form.addField(healthSection, "HealthURL", "URL", item.Health.URL)
 	form.addField(healthSection, "HealthAddress", "Address", item.Health.Address)
 	form.addField(healthSection, "HealthTimeout", "Timeout", durationString(item.Health.Timeout))
 	form.addField(healthSection, "HealthInterval", "Interval", durationString(item.Health.Interval))
-	form.addField(restartSection, "RestartPolicy", "Policy", item.Restart.Policy)
+	form.addField(restartSection, fieldRestartPolicy, "Policy", item.Restart.Policy)
 	form.addField(restartSection, "RestartMaxAttempts", "Max attempts", intString(item.Restart.MaxAttempts))
 	form.addField(restartSection, "RestartWindow", "Window", durationString(item.Restart.Window))
 	form.addField(restartSection, "InitialBackoff", "Initial backoff", durationString(item.Restart.InitialBackoff))
@@ -226,8 +237,8 @@ func newProcessForm(cfg config.Config, projectIndex, processIndex int) (*editFor
 	form.addField(loggingSection, "LogMaxFiles", "Max files", intString(item.Log.MaxFiles))
 	form.addField(loggingSection, "LogBufferLines", "Buffer lines", intString(item.Log.BufferLines))
 	form.toggles = []formToggle{
-		{label: "Shell", display: "Shell", section: basicSection},
-		{label: "Autostart", display: "Autostart", section: basicSection},
+		{label: toggleShell, display: toggleShell, section: basicSection},
+		{label: toggleAutostart, display: toggleAutostart, section: basicSection},
 	}
 	form.focusFirst()
 	return form, nil
@@ -297,11 +308,11 @@ func (f *editForm) toggle(label string) {
 func (f *editForm) update(msg tea.Msg) tea.Cmd {
 	key, isKey := msg.(tea.KeyPressMsg)
 	if isKey {
-		if f.kind == processForm && f.focusLabel() == "EnvValue" && key.Code == tea.KeyEnter {
+		if f.kind == processForm && f.focusLabel() == fieldEnvValue && key.Code == tea.KeyEnter {
 			f.setEnvValue()
 			return nil
 		}
-		if f.kind == processForm && f.focusLabel() == "EnvKey" && key.Code == 'x' && key.Mod == tea.ModCtrl {
+		if f.kind == processForm && f.focusLabel() == fieldEnvKey && key.Code == 'x' && key.Mod == tea.ModCtrl {
 			f.deleteEnvKey()
 			return nil
 		}
@@ -318,7 +329,7 @@ func (f *editForm) update(msg tea.Msg) tea.Cmd {
 			return nil
 		case ' ':
 			label := f.focusLabel()
-			if label == "Shell" || label == "Autostart" {
+			if label == toggleShell || label == toggleAutostart {
 				f.toggle(label)
 				return nil
 			}
@@ -330,7 +341,7 @@ func (f *editForm) update(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		label := f.focusLabel()
-		if label == "HealthType" || label == "RestartPolicy" {
+		if label == fieldHealthType || label == fieldRestartPolicy {
 			return nil
 		}
 	}
@@ -344,7 +355,7 @@ func (f *editForm) update(msg tea.Msg) tea.Cmd {
 }
 
 func (f *editForm) setEnvValue() {
-	key := strings.TrimSpace(f.value("EnvKey"))
+	key := strings.TrimSpace(f.value(fieldEnvKey))
 	if key == "" {
 		f.err = fmt.Errorf("env key must not be empty")
 		return
@@ -352,18 +363,18 @@ func (f *editForm) setEnvValue() {
 	if f.workingEnv == nil {
 		f.workingEnv = make(map[string]string)
 	}
-	f.workingEnv[key] = f.value("EnvValue")
-	f.set("EnvValue", "")
+	f.workingEnv[key] = f.value(fieldEnvValue)
+	f.set(fieldEnvValue, "")
 	f.err = nil
 }
 
 func (f *editForm) deleteEnvKey() {
-	key := strings.TrimSpace(f.value("EnvKey"))
+	key := strings.TrimSpace(f.value(fieldEnvKey))
 	delete(f.workingEnv, key)
 	if len(f.workingEnv) == 0 {
 		f.workingEnv = nil
 	}
-	f.set("EnvValue", "")
+	f.set(fieldEnvValue, "")
 }
 
 func (f *editForm) moveFocus(delta int) {
@@ -385,10 +396,10 @@ func (f *editForm) cycleEnum(delta int) {
 	}
 	var values []string
 	switch label {
-	case "HealthType":
-		values = []string{"process", "http", "tcp"}
-	case "RestartPolicy":
-		values = []string{"never", "on-failure", "always"}
+	case fieldHealthType:
+		values = []string{config.HealthProcess, config.HealthHTTP, config.HealthTCP}
+	case fieldRestartPolicy:
+		values = []string{config.RestartNever, config.RestartOnFailure, config.RestartAlways}
 	default:
 		return
 	}
@@ -417,7 +428,7 @@ func (f *editForm) header() string {
 	if f.creating {
 		return "New " + noun
 	}
-	name := strings.TrimSpace(f.value("Name"))
+	name := strings.TrimSpace(f.value(fieldName))
 	if name == "" {
 		return "Edit " + noun
 	}
@@ -428,12 +439,12 @@ func (f *editForm) view() string {
 	if f.width < 9 {
 		return formHeaderStyle.MaxWidth(f.width).Render(f.header())
 	}
-	width := max(f.width-4, 1)
-	bodyWidth := max(width-4, 1)
+	width := max(f.width-formOuterInset, 1)
+	bodyWidth := max(width-formInnerInset, 1)
 	var body string
-	if f.kind == processForm && f.width >= 80 {
-		sidebar := f.renderSidebar(16)
-		panelWidth := max(bodyWidth-lipgloss.Width(sidebar)-2, 24)
+	if f.kind == processForm && f.width >= wideFormBreakpoint {
+		sidebar := f.renderSidebar(formSidebarWidth)
+		panelWidth := max(bodyWidth-lipgloss.Width(sidebar)-panelGap, minimumPanelWidth)
 		body = lipgloss.JoinHorizontal(lipgloss.Top, sidebar, "  ", f.renderPanel(panelWidth))
 	} else {
 		if f.kind == processForm {
@@ -500,7 +511,7 @@ func (f *editForm) renderField(field formField, width int) string {
 	input.SetWidth(max(width-6, 1))
 	input.SetCursor(input.Position())
 	value := input.View()
-	if field.label == "HealthType" || field.label == "RestartPolicy" {
+	if field.label == fieldHealthType || field.label == fieldRestartPolicy {
 		value = "‹ " + field.input.Value() + " ›"
 	}
 	style := formInputStyle
@@ -508,7 +519,7 @@ func (f *editForm) renderField(field formField, width int) string {
 		style = formFocusedInputStyle
 	}
 	result := label + "\n" + style.Width(max(width-4, 1)).Render(value)
-	if field.label != "EnvKey" {
+	if field.label != fieldEnvKey {
 		return result
 	}
 	keys := make([]string, 0, len(f.workingEnv))
@@ -530,7 +541,7 @@ func (f *editForm) renderToggle(toggle formToggle) string {
 		style = formEnabledToggleStyle
 	}
 	if f.focusLabel() == toggle.label {
-		style = style.Foreground(lipgloss.Color("12")).Bold(true)
+		style = style.Foreground(lipgloss.Color(colorAccent)).Bold(true)
 	}
 	return style.Render(marker + " " + toggle.display)
 }
@@ -561,25 +572,25 @@ func (f *editForm) configWithoutValidation() (config.Config, error) {
 	}
 	if f.kind == projectForm {
 		project := &result.Projects[f.projectIndex]
-		project.Name = strings.TrimSpace(f.value("Name"))
-		project.Directory = strings.TrimSpace(f.value("Directory"))
-		project.Autostart = f.booleans["Autostart"]
+		project.Name = strings.TrimSpace(f.value(fieldName))
+		project.Directory = strings.TrimSpace(f.value(fieldDirectory))
+		project.Autostart = f.booleans[toggleAutostart]
 		return result, nil
 	}
 
 	item := &result.Projects[f.projectIndex].Processes[f.processIndex]
-	item.Name = strings.TrimSpace(f.value("Name"))
+	item.Name = strings.TrimSpace(f.value(fieldName))
 	item.Command = f.value("Command")
-	item.Shell = f.booleans["Shell"]
-	item.Directory = strings.TrimSpace(f.value("Directory"))
+	item.Shell = f.booleans[toggleShell]
+	item.Directory = strings.TrimSpace(f.value(fieldDirectory))
 	item.EnvFile = strings.TrimSpace(f.value("EnvFile"))
-	item.Autostart = f.booleans["Autostart"]
-	if err := parseJSONField("args", f.value("Args"), &item.Args); err != nil {
+	item.Autostart = f.booleans[toggleAutostart]
+	if err := parseJSONField("args", f.value(fieldArgs), &item.Args); err != nil {
 		return config.Config{}, err
 	}
 	if item.Args == nil {
 		item.Args = nil
-	} else if len(item.Args) == 0 && f.value("Args") == "[]" && f.base.Projects[f.projectIndex].Processes[f.processIndex].Args == nil {
+	} else if len(item.Args) == 0 && f.value(fieldArgs) == "[]" && f.base.Projects[f.projectIndex].Processes[f.processIndex].Args == nil {
 		item.Args = nil
 	}
 	if item.Shell && len(item.Args) > 0 {
@@ -590,7 +601,7 @@ func (f *editForm) configWithoutValidation() (config.Config, error) {
 	if len(item.DependsOn) == 0 && f.base.Projects[f.projectIndex].Processes[f.processIndex].DependsOn == nil {
 		item.DependsOn = nil
 	}
-	item.Health.Type = strings.TrimSpace(f.value("HealthType"))
+	item.Health.Type = strings.TrimSpace(f.value(fieldHealthType))
 	item.Health.URL = strings.TrimSpace(f.value("HealthURL"))
 	item.Health.Address = strings.TrimSpace(f.value("HealthAddress"))
 	if item.Health.Timeout, err = parseDurationField("health timeout", f.value("HealthTimeout")); err != nil {
@@ -599,7 +610,7 @@ func (f *editForm) configWithoutValidation() (config.Config, error) {
 	if item.Health.Interval, err = parseDurationField("health interval", f.value("HealthInterval")); err != nil {
 		return config.Config{}, err
 	}
-	item.Restart.Policy = strings.TrimSpace(f.value("RestartPolicy"))
+	item.Restart.Policy = strings.TrimSpace(f.value(fieldRestartPolicy))
 	if item.Restart.MaxAttempts, err = parseIntField("restart max attempts", f.value("RestartMaxAttempts")); err != nil {
 		return config.Config{}, err
 	}

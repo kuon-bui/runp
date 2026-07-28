@@ -11,10 +11,15 @@ import (
 
 var envKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+const (
+	initialEnvScanBuffer = 4 * 1024
+	maximumEnvLineBytes  = 1 << 20
+)
+
 func ParseEnv(r io.Reader) (map[string]string, error) {
 	values := make(map[string]string)
 	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 4096), 1<<20)
+	scanner.Buffer(make([]byte, initialEnvScanBuffer), maximumEnvLineBytes)
 	for lineNumber := 1; scanner.Scan(); lineNumber++ {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {

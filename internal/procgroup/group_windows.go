@@ -12,6 +12,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+const forcedExitCode = 1
+
 type Group struct {
 	cmd       *exec.Cmd
 	pid       int
@@ -74,7 +76,7 @@ func (g *Group) Graceful() error {
 }
 
 func (g *Group) Force() error {
-	err := windows.TerminateJobObject(g.job, 1)
+	err := windows.TerminateJobObject(g.job, forcedExitCode)
 	if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
 		return nil
 	}

@@ -18,7 +18,7 @@ func WaitHealthy(ctx context.Context, cfg config.HealthConfig, alive AliveFunc) 
 	defer cancel()
 
 	interval := time.Duration(cfg.Interval)
-	if cfg.Type == "process" {
+	if cfg.Type == config.HealthProcess {
 		if err := wait(ctx, interval); err != nil {
 			return fmt.Errorf("process health: %w", err)
 		}
@@ -32,9 +32,9 @@ func WaitHealthy(ctx context.Context, cfg config.HealthConfig, alive AliveFunc) 
 	for {
 		var probeErr error
 		switch cfg.Type {
-		case "http":
+		case config.HealthHTTP:
 			probeErr = probeHTTP(ctx, cfg.URL)
-		case "tcp":
+		case config.HealthTCP:
 			probeErr = probeTCP(ctx, cfg.Address)
 		default:
 			return fmt.Errorf("%s health: unsupported type", cfg.Type)
@@ -69,7 +69,7 @@ func probeHTTP(ctx context.Context, url string) error {
 	if err := response.Body.Close(); err != nil {
 		return err
 	}
-	if response.StatusCode < 200 || response.StatusCode >= 400 {
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusBadRequest {
 		return fmt.Errorf("unexpected status %d", response.StatusCode)
 	}
 	return nil

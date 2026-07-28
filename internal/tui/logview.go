@@ -12,6 +12,12 @@ import (
 	"runp/internal/logstore"
 )
 
+const (
+	logHeaderFooterHeight = 3
+	searchPromptWidth     = 2
+	logTimeFormat         = "15:04:05.000"
+)
+
 type logView struct {
 	project  string
 	process  string
@@ -26,14 +32,14 @@ type logView struct {
 func newLogView(project, process string, width, height int) logView {
 	input := textinput.New()
 	input.Prompt = "/ "
-	input.SetWidth(max(1, width-2))
+	input.SetWidth(max(1, width-searchPromptWidth))
 	return logView{
 		project: project,
 		process: process,
 		follow:  true,
 		viewport: viewport.New(
 			viewport.WithWidth(max(1, width)),
-			viewport.WithHeight(max(1, height-3)),
+			viewport.WithHeight(max(1, height-logHeaderFooterHeight)),
 		),
 		input: input,
 	}
@@ -41,8 +47,8 @@ func newLogView(project, process string, width, height int) logView {
 
 func (l *logView) resize(width, height int) {
 	l.viewport.SetWidth(max(1, width))
-	l.viewport.SetHeight(max(1, height-3))
-	l.input.SetWidth(max(1, width-2))
+	l.viewport.SetHeight(max(1, height-logHeaderFooterHeight))
+	l.input.SetWidth(max(1, width-searchPromptWidth))
 }
 
 func (l *logView) refresh(services Services) {
@@ -62,7 +68,7 @@ func (l *logView) refresh(services Services) {
 		if record.Stream == logstore.Stderr {
 			stream = "ERR"
 		}
-		lines = append(lines, fmt.Sprintf("%s %s %s", record.At.Local().Format("15:04:05.000"), stream, record.Text))
+		lines = append(lines, fmt.Sprintf("%s %s %s", record.At.Local().Format(logTimeFormat), stream, record.Text))
 	}
 	l.viewport.SetContentLines(lines)
 	l.applyHighlights()

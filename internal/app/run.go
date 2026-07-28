@@ -20,6 +20,11 @@ import (
 	"runp/internal/tui"
 )
 
+const (
+	logBatchInterval = 50 * time.Millisecond
+	shutdownTimeout  = 10 * time.Second
+)
+
 var runProgram = func(program *tea.Program) error {
 	_, err := program.Run()
 	return err
@@ -57,7 +62,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if err != nil {
 		return fmt.Errorf("data directory: %w", err)
 	}
-	logs := logstore.New(filepath.Join(dataDir, "logs"), 50*time.Millisecond)
+	logs := logstore.New(filepath.Join(dataDir, "logs"), logBatchInterval)
 	manager := process.NewManager(logs)
 	control, err := controller.New(cfg, manager)
 	if err != nil {
@@ -65,7 +70,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return fmt.Errorf("controller: %w", err)
 	}
 	defer func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		result = errors.Join(result, control.Shutdown(cleanupCtx), logs.Close())
 	}()
