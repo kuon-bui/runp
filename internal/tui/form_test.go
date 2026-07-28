@@ -5,11 +5,13 @@ import (
 	"errors"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
 
 	"runp/internal/config"
 	"runp/internal/controller"
@@ -108,6 +110,27 @@ func TestNewProcessSaveDoesNotReadMissingRuntimeSnapshot(t *testing.T) {
 	}
 }
 
+func TestModelPropagatesWindowSizeToOpenForm(t *testing.T) {
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
+	model := New(Services{
+		Snapshots: func() controller.Snapshot {
+			return controller.Snapshot{Projects: []controller.ProjectSnapshot{{Name: "shop"}}}
+		},
+		Config: func() config.Config { return cfg },
+	})
+	opened, _ := model.Update(tea.KeyPressMsg{Code: 'a'})
+	opened, _ = opened.(Model).Update(tea.KeyPressMsg{Code: 'o'})
+	resized, _ := opened.(Model).Update(tea.WindowSizeMsg{Width: 70, Height: 20})
+	got := resized.(Model)
+	if got.form.width != 70 || got.form.height != 20 {
+		t.Fatalf("form size = %dx%d", got.form.width, got.form.height)
+	}
+	if !strings.Contains(got.View().Content, "[ Basic ]") {
+		t.Fatalf("form did not switch to narrow layout: %q", got.View().Content)
+	}
+}
+
 func TestProcessFormBuildsAllFields(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()
@@ -157,6 +180,166 @@ func TestProcessFormBuildsAllFields(t *testing.T) {
 	}
 }
 
+func TestProcessFormGroupsControlsAndCrossesSectionBoundaryWithKeys(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: dir}}
+
+	tests := []struct {
+		name        string
+		start       string
+		key         tea.KeyPressMsg
+		wantLabel   string
+		wantSection formSection
+	}{
+		{name: "tab forward", start: "Autostart", key: tea.KeyPressMsg{Code: tea.KeyTab}, wantLabel: "EnvKey", wantSection: environmentSection},
+		{name: "down forward", start: "Autostart", key: tea.KeyPressMsg{Code: tea.KeyDown}, wantLabel: "EnvKey", wantSection: environmentSection},
+		{name: "shift-tab backward", start: "EnvKey", key: tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}, wantLabel: "Autostart", wantSection: basicSection},
+		{name: "up backward", start: "EnvKey", key: tea.KeyPressMsg{Code: tea.KeyUp}, wantLabel: "Autostart", wantSection: basicSection},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			form, err := newProcessForm(cfg, 0, -1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for form.focusLabel() != test.start {
+				form.update(tea.KeyPressMsg{Code: tea.KeyTab})
+			}
+			form.update(test.key)
+			if form.focusLabel() != test.wantLabel || form.activeSection() != test.wantSection {
+				t.Fatalf("focus/section = %q/%v, want %q/%v", form.focusLabel(), form.activeSection(), test.wantLabel, test.wantSection)
+			}
+		})
+	}
+}
+
+func TestProcessFormRendersWideSidebarAndOnlyActiveSection(t *testing.T) {
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
+	form, err := newProcessForm(cfg, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	form.resize(100, 30)
+	form.toggle("Autostart")
+	view := form.view()
+	for _, want := range []string{"New process", "▸ Basic", "Command", "Arguments", "✓", "Autostart"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("view missing %q: %q", want, view)
+		}
+	}
+	for _, unwanted := range []string{"Environment file", "Health type", "Max attempts", "Buffer lines"} {
+		if strings.Contains(view, unwanted) {
+			t.Fatalf("inactive field %q rendered: %q", unwanted, view)
+		}
+	}
+}
+
+func TestProcessFormRendersHorizontalTabsWhenNarrow(t *testing.T) {
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
+	form, err := newProcessForm(cfg, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	form.resize(79, 24)
+	view := form.view()
+	if !strings.Contains(view, "[ Basic ]") || strings.Contains(view, "▸ Basic\n") {
+		t.Fatalf("narrow navigation = %q", view)
+	}
+}
+
+func TestProcessFormNarrowLongValueUsesNarrowInputViewport(t *testing.T) {
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
+	form, err := newProcessForm(cfg, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	form.set("Command", strings.Repeat("x", 40))
+	field := form.fields[form.fieldIndex("Command")]
+	rendered := form.renderField(field, 10)
+	if got := strings.Count(rendered, "\n") + 1; got != 5 {
+		t.Fatalf("rendered field height = %d, want 5: %q", got, rendered)
+	}
+}
+
+func TestFormRenderedWidthNeverExceedsTinyTerminal(t *testing.T) {
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
+	form, err := newProcessForm(cfg, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for width := 1; width < 9; width++ {
+		form.resize(width, 24)
+		if got := lipgloss.Width(form.view()); got > width {
+			t.Fatalf("width %d rendered as %d cells", width, got)
+		}
+	}
+}
+
+func TestProcessFormRendersFriendlyEnumAndToggleControls(t *testing.T) {
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
+	form, err := newProcessForm(cfg, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for form.focusLabel() != "HealthType" {
+		form.moveFocus(1)
+	}
+	form.set("HealthType", "process")
+	view := form.view()
+	if !strings.Contains(view, "Health type") || !strings.Contains(view, "‹ process ›") {
+		t.Fatalf("health controls = %q", view)
+	}
+}
+
+func TestProcessFormEnumKeysCycleAndWrap(t *testing.T) {
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
+	tests := []struct {
+		label string
+		start string
+		key   tea.KeyPressMsg
+		want  string
+	}{
+		{label: "HealthType", start: "process", key: tea.KeyPressMsg{Code: tea.KeyLeft}, want: "tcp"},
+		{label: "HealthType", start: "tcp", key: tea.KeyPressMsg{Code: tea.KeyRight}, want: "process"},
+		{label: "RestartPolicy", start: "never", key: tea.KeyPressMsg{Code: tea.KeyLeft}, want: "always"},
+		{label: "RestartPolicy", start: "always", key: tea.KeyPressMsg{Code: tea.KeyRight}, want: "never"},
+	}
+	for _, test := range tests {
+		t.Run(test.label+"/"+test.start, func(t *testing.T) {
+			form, err := newProcessForm(cfg, 0, -1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for form.focusLabel() != test.label {
+				form.update(tea.KeyPressMsg{Code: tea.KeyTab})
+			}
+			form.set(test.label, test.start)
+			form.update(test.key)
+			if got := form.value(test.label); got != test.want {
+				t.Fatalf("value = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestShiftTabMovesFormFocusBackward(t *testing.T) {
+	form, err := newProjectForm(config.Default(), -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	form.update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if form.focusLabel() != "Autostart" {
+		t.Fatalf("focus = %q", form.focusLabel())
+	}
+}
+
 func TestProcessFormRejectsShellArgs(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()
@@ -179,6 +362,7 @@ func TestProcessFormMasksEnvironmentValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	form.focus = slices.Index(form.focusLabels(), "EnvKey")
 	view := form.view()
 	if !strings.Contains(view, "TOKEN") || strings.Contains(view, "secret-value") {
 		t.Fatalf("unsafe view = %q", view)
@@ -186,12 +370,7 @@ func TestProcessFormMasksEnvironmentValues(t *testing.T) {
 	if _, err := os.Stat("/tmp/do-not-read"); err == nil {
 		t.Fatal("test envFile unexpectedly exists")
 	}
-	valueIndex := -1
-	for index, field := range form.fields {
-		if field.label == "EnvValue" {
-			valueIndex = index
-		}
-	}
+	valueIndex := slices.Index(form.focusLabels(), "EnvValue")
 	if valueIndex < 0 {
 		t.Fatal("password env value input missing")
 	}
@@ -209,7 +388,7 @@ func TestProcessFormMasksEnvironmentValues(t *testing.T) {
 	if got.Projects[0].Processes[0].Env["TOKEN"] != "replacement-secret" {
 		t.Fatalf("env = %#v", got.Projects[0].Processes[0].Env)
 	}
-	form.focus = valueIndex - 1
+	form.focus = slices.Index(form.focusLabels(), "EnvKey")
 	form.update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	got, _ = form.configWithoutValidation()
 	if _, exists := got.Projects[0].Processes[0].Env["TOKEN"]; exists {
@@ -229,7 +408,7 @@ func TestFormKeyboardTogglesFocusableBooleans(t *testing.T) {
 		form.update(tea.KeyPressMsg{Code: tea.KeyTab})
 	}
 	form.update(tea.KeyPressMsg{Code: ' '})
-	if !form.booleans["Shell"] || !strings.Contains(form.view(), "› Shell: true") {
+	if !form.booleans["Shell"] || !strings.Contains(form.view(), "✓ Shell") {
 		t.Fatalf("form = %q", form.view())
 	}
 	form.update(tea.KeyPressMsg{Code: tea.KeyTab})

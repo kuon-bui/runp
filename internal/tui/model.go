@@ -96,6 +96,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.log.resize(m.width, m.height)
 			m.log.refresh(m.services)
 		}
+		if m.form != nil {
+			m.form.resize(m.width, m.height)
+		}
 	case runtimeEventMsg:
 		m.snapshot = controller.Event(msg).Snapshot
 		m.clampSelection()
@@ -451,6 +454,7 @@ func (m *Model) openProjectForm(index int) error {
 	if err != nil {
 		return err
 	}
+	form.resize(m.width, m.height)
 	m.form = form
 	return nil
 }
@@ -466,6 +470,7 @@ func (m *Model) openProcessForm(index int) error {
 	if err != nil {
 		return err
 	}
+	form.resize(m.width, m.height)
 	m.form = form
 	if index >= 0 {
 		m.editProject = m.snapshot.Projects[m.projectIndex].Name

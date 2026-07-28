@@ -135,7 +135,7 @@ func TestProjectEditRoute(t *testing.T) {
 	})
 	opened, _ := model.Update(tea.KeyPressMsg{Code: 'g'})
 	edited, _ := opened.(tui.Model).Update(tea.KeyPressMsg{Code: 'e'})
-	if !strings.Contains(edited.(tui.Model).View().Content, "Project form") {
+	if !strings.Contains(edited.(tui.Model).View().Content, "Edit project · shop") {
 		t.Fatalf("view = %q", edited.(tui.Model).View().Content)
 	}
 }
