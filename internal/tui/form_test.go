@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -18,6 +19,20 @@ import (
 	"runp/internal/logstore"
 	"runp/internal/process"
 )
+
+var formANSIPattern = regexp.MustCompile(`\x1b\[[0-9;:]*m`)
+
+func formHasANSICode(value, code string) bool {
+	for _, sequence := range formANSIPattern.FindAllString(value, -1) {
+		parameters := strings.TrimSuffix(strings.TrimPrefix(sequence, "\x1b["), "m")
+		for _, parameter := range strings.FieldsFunc(parameters, func(r rune) bool { return r == ';' || r == ':' }) {
+			if parameter == code {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 func TestProjectFormValidatesAndBuildsCopy(t *testing.T) {
 	original := config.Default()
@@ -261,8 +276,8 @@ func TestProcessFormNarrowLongValueUsesNarrowInputViewport(t *testing.T) {
 	form.set("Command", strings.Repeat("x", 40))
 	field := form.fields[form.fieldIndex("Command")]
 	rendered := form.renderField(field, 10)
-	if got := strings.Count(rendered, "\n") + 1; got != 5 {
-		t.Fatalf("rendered field height = %d, want 5: %q", got, rendered)
+	if got := strings.Count(rendered, "\n") + 1; got != 3 {
+		t.Fatalf("rendered field height = %d, want 3: %q", got, rendered)
 	}
 }
 
@@ -322,6 +337,43 @@ func TestFormModalUsesCalculatedSize(t *testing.T) {
 	form.resize(100, 24)
 	if width, height := lipgloss.Size(form.view()); width != 90 || height != 20 {
 		t.Fatalf("form = %dx%d, want 90x20", width, height)
+	}
+}
+
+func TestFormModalUsesRootBackgroundWithoutRaisedFill(t *testing.T) {
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
+	form, err := newProcessForm(cfg, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	form.resize(100, 24)
+	view := form.view()
+	if formHasANSICode(view, "238") {
+		t.Fatalf("raised modal background rendered: %q", view)
+	}
+	if width, height := lipgloss.Size(view); width != 90 || height != 20 {
+		t.Fatalf("form = %dx%d, want 90x20", width, height)
+	}
+}
+
+func TestFormFocusedFieldHasStrongerBoundaryThanUnfocusedField(t *testing.T) {
+	form, err := newProjectForm(config.Default(), -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := form.fields[form.fieldIndex(fieldName)]
+	directory := form.fields[form.fieldIndex(fieldDirectory)]
+	focused := form.renderField(name, 60)
+	unfocused := form.renderField(directory, 60)
+	if !strings.Contains(focused, "Name") || !strings.Contains(unfocused, "Directory") {
+		t.Fatalf("field labels missing: %q / %q", focused, unfocused)
+	}
+	if !strings.Contains(focused, "━") || strings.Contains(unfocused, "━") {
+		t.Fatalf("focus boundary hierarchy missing: %q / %q", focused, unfocused)
+	}
+	if !formHasANSICode(focused, "96") || !formHasANSICode(unfocused, "90") {
+		t.Fatalf("focus palette missing: %q / %q", focused, unfocused)
 	}
 }
 

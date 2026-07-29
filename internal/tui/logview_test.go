@@ -76,7 +76,7 @@ func TestLogFollow(t *testing.T) {
 	}
 }
 
-func TestLogViewerUsesOperationsChromeAndWholeTerminal(t *testing.T) {
+func TestLogViewerUsesTerminalNativeChromeAndWholeTerminal(t *testing.T) {
 	model := logModelWithRecords([]logstore.Record{{
 		At: time.Unix(1, 0), Stream: logstore.Stdout, Text: "ready",
 	}})
@@ -86,6 +86,7 @@ func TestLogViewerUsesOperationsChromeAndWholeTerminal(t *testing.T) {
 	if width, height := lipgloss.Size(view); width != 90 || height != 22 {
 		t.Fatalf("screen = %dx%d", width, height)
 	}
+	assertTerminalNativePalette(t, view)
 	plain := stripANSI(view)
 	for _, want := range []string{"RUNP", "SHOP / API", "BOTH", "FOLLOW", "LOG OUTPUT", "ready", "[f] Follow", "[/] Search"} {
 		if !strings.Contains(plain, want) {

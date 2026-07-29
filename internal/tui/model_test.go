@@ -20,7 +20,39 @@ import (
 
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;:]*m`)
 
+const (
+	ansiSurface = "236"
+	ansiRaised  = "238"
+	ansiAccent  = "96"
+	ansiMuted   = "90"
+	ansiSuccess = "92"
+)
+
 func stripANSI(value string) string { return ansiPattern.ReplaceAllString(value, "") }
+
+func hasANSICode(value, code string) bool {
+	for _, sequence := range ansiPattern.FindAllString(value, -1) {
+		parameters := strings.TrimSuffix(strings.TrimPrefix(sequence, "\x1b["), "m")
+		for _, parameter := range strings.FieldsFunc(parameters, func(r rune) bool { return r == ';' || r == ':' }) {
+			if parameter == code {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func assertTerminalNativePalette(t *testing.T, view string) {
+	t.Helper()
+	if hasANSICode(view, ansiRaised) {
+		t.Fatalf("raised background rendered: %q", view)
+	}
+	for _, want := range []string{ansiSurface, ansiAccent, ansiMuted} {
+		if !hasANSICode(view, want) {
+			t.Fatalf("view missing ANSI code %q: %q", want, view)
+		}
+	}
+}
 
 func dashboardFixture() controller.Snapshot {
 	return controller.Snapshot{Projects: []controller.ProjectSnapshot{
@@ -80,6 +112,16 @@ func TestDashboardUsesWholeTerminalAndShowsPID(t *testing.T) {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("view missing %q: %q", want, plain)
 		}
+	}
+}
+
+func TestDashboardUsesTerminalNativePalette(t *testing.T) {
+	model := tui.New(tui.Services{Snapshots: dashboardFixture})
+	model = updateModel(t, model, tea.WindowSizeMsg{Width: 120, Height: 30})
+	view := model.View().Content
+	assertTerminalNativePalette(t, view)
+	if !hasANSICode(view, ansiSuccess) || !strings.Contains(stripANSI(view), "› api") {
+		t.Fatalf("semantic state or selection marker missing: %q", view)
 	}
 }
 
@@ -252,6 +294,17 @@ func TestProjectMenuRendersCenteredWithoutGrowingScreen(t *testing.T) {
 	}
 	if menuLine < 6 || menuLine > 16 {
 		t.Fatalf("menu row = %d", menuLine)
+	}
+}
+
+func TestProjectMenuUsesCompactTerminalNativePalette(t *testing.T) {
+	model := tui.New(tui.Services{Snapshots: dashboardFixture})
+	model = updateModel(t, model, tea.WindowSizeMsg{Width: 100, Height: 24})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: 'g'})
+	view := model.View().Content
+	assertTerminalNativePalette(t, view)
+	if width, height := lipgloss.Size(view); width != 100 || height != 24 {
+		t.Fatalf("screen = %dx%d", width, height)
 	}
 }
 
