@@ -8,12 +8,13 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
 
 	"runp/internal/logstore"
 )
 
 const (
-	logHeaderFooterHeight = 3
+	logHeaderFooterHeight = 2
 	searchPromptWidth     = 2
 	logTimeFormat         = "15:04:05.000"
 )
@@ -27,7 +28,66 @@ type logView struct {
 	search   bool
 	viewport viewport.Model
 	input    textinput.Model
+	width    int
+	height   int
 }
+
+func formatLogRecords(records []logstore.Record) []string {
+	lines := make([]string, 0, len(records))
+	for _, record := range records {
+		stream := "OUT"
+		if record.Stream == logstore.Stderr {
+			stream = "ERR"
+		}
+		lines = append(lines, fmt.Sprintf("%s %s %s", record.At.Local().Format(logTimeFormat), stream, record.Text))
+	}
+	return lines
+}
+
+type logPreview struct {
+	project  string
+	process  string
+	viewport viewport.Model
+}
+
+func newLogPreview(width, height int) logPreview {
+	view := viewport.New(
+		viewport.WithWidth(max(width, 1)),
+		viewport.WithHeight(max(height, 1)),
+	)
+	view.FillHeight = true
+	return logPreview{viewport: view}
+}
+
+func (l *logPreview) show(project, process string, services Services) {
+	l.project, l.process = project, process
+	l.refresh(services)
+}
+
+func (l *logPreview) refresh(services Services) {
+	var records []logstore.Record
+	if l.project != "" && l.process != "" && services.LogSnapshot != nil {
+		records = services.LogSnapshot(l.project, l.process)
+	}
+	lines := formatLogRecords(records)
+	if len(lines) == 0 {
+		lines = []string{"Waiting for output…"}
+	}
+	l.viewport.SetContentLines(lines)
+	l.viewport.GotoBottom()
+}
+
+func (l *logPreview) resize(width, height int) {
+	l.viewport.SetWidth(max(width, 1))
+	l.viewport.SetHeight(max(height, 1))
+	l.viewport.GotoBottom()
+}
+
+func (l logPreview) matches(event logstore.Event) bool {
+	return event.Project == l.project && event.Process == l.process
+}
+
+func (l logPreview) render() string { return l.viewport.View() }
 
 func newLogView(project, process string, width, height int) logView {
 	input := textinput.New()
@@ -37,18 +97,30 @@ func newLogView(project, process string, width, height int) logView {
 		project: project,
 		process: process,
 		follow:  true,
+		width:   max(1, width),
+		height:  max(1, height),
 		viewport: viewport.New(
-			viewport.WithWidth(max(1, width)),
-			viewport.WithHeight(max(1, height-logHeaderFooterHeight)),
+			viewport.WithWidth(logViewportWidth(width)),
+			viewport.WithHeight(logViewportHeight(height)),
 		),
 		input: input,
 	}
 }
 
 func (l *logView) resize(width, height int) {
-	l.viewport.SetWidth(max(1, width))
-	l.viewport.SetHeight(max(1, height-logHeaderFooterHeight))
+	l.width = max(1, width)
+	l.height = max(1, height)
+	l.viewport.SetWidth(logViewportWidth(width))
+	l.viewport.SetHeight(logViewportHeight(height))
 	l.input.SetWidth(max(1, width-searchPromptWidth))
+}
+
+func logViewportWidth(width int) int {
+	return max(1, width-paneFrameWidth-2*paneHorizontalPadding)
+}
+
+func logViewportHeight(height int) int {
+	return max(1, height-logHeaderFooterHeight-paneFrameWidth-1)
 }
 
 func (l *logView) refresh(services Services) {
@@ -62,15 +134,7 @@ func (l *logView) refresh(services Services) {
 			records = filterRecords(records, filter)
 		}
 	}
-	lines := make([]string, 0, len(records))
-	for _, record := range records {
-		stream := "OUT"
-		if record.Stream == logstore.Stderr {
-			stream = "ERR"
-		}
-		lines = append(lines, fmt.Sprintf("%s %s %s", record.At.Local().Format(logTimeFormat), stream, record.Text))
-	}
-	l.viewport.SetContentLines(lines)
+	l.viewport.SetContentLines(formatLogRecords(records))
 	l.applyHighlights()
 	if l.follow {
 		l.viewport.GotoBottom()
@@ -170,12 +234,24 @@ func (l logView) render() string {
 	if l.follow {
 		mode = "FOLLOW"
 	}
-	header := fmt.Sprintf("%s / %s  %s  %s", l.project, l.process, stream, mode)
+	header := appHeaderStyle.Width(l.width).MaxHeight(1).Render(fmt.Sprintf(
+		"RUNP  %s / %s  %s  %s",
+		strings.ToUpper(l.project), strings.ToUpper(l.process), stream, mode,
+	))
 	if l.query != "" {
-		header += "  /" + l.query
+		header = appHeaderStyle.Width(l.width).MaxHeight(1).Render(
+			fmt.Sprintf("RUNP  %s / %s  %s  %s  /%s", strings.ToUpper(l.project), strings.ToUpper(l.process), stream, mode, l.query),
+		)
 	}
+	footer := appFooterStyle.Width(l.width).MaxHeight(1).Render(
+		"[Esc] Back  [f] Follow  [t] Stream  [/] Search  [n/N] Match",
+	)
 	if l.search {
-		return header + "\n" + l.viewport.View() + "\n" + l.input.View()
+		footer = appFooterStyle.Width(l.width).MaxHeight(1).Render(l.input.View())
 	}
-	return header + "\n" + l.viewport.View() + "\nEsc back  f follow  t stream  / search  n/N match"
+	body := renderPane("LOG OUTPUT", l.viewport.View(), l.width, max(l.height-logHeaderFooterHeight, 1))
+	return fitScreen(
+		lipgloss.JoinVertical(lipgloss.Left, header, body, footer),
+		l.width, l.height,
+	)
 }

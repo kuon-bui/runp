@@ -6,6 +6,7 @@ import (
 	"reflect"
 
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
 
 	"runp/internal/config"
 	"runp/internal/controller"
@@ -58,6 +59,7 @@ type Model struct {
 	busy          bool
 	err           error
 	log           *logView
+	preview       logPreview
 	form          *editForm
 	pendingConfig config.Config
 	editProject   string
@@ -74,8 +76,14 @@ type operationDoneMsg struct {
 }
 
 func New(services Services) Model {
-	model := Model{services: services, width: defaultTerminalWidth, height: defaultTerminalHeight}
+	model := Model{
+		services: services,
+		width:    defaultTerminalWidth,
+		height:   defaultTerminalHeight,
+		preview:  newLogPreview(1, 1),
+	}
 	model.refresh()
+	model.refreshPreview()
 	return model
 }
 
@@ -92,6 +100,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.resizePreview()
 		if m.log != nil {
 			m.log.resize(m.width, m.height)
 			m.log.refresh(m.services)
@@ -100,18 +109,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.form.resize(m.width, m.height)
 		}
 	case runtimeEventMsg:
+		beforeProject, beforeProcess, beforeSelected := m.selected()
 		m.snapshot = controller.Event(msg).Snapshot
 		m.clampSelection()
+		afterProject, afterProcess, afterSelected := m.selected()
+		if beforeSelected != afterSelected || beforeProject != afterProject || beforeProcess != afterProcess {
+			m.refreshPreview()
+		}
 		return m, waitRuntime(m.services.RuntimeEvents)
 	case logEventMsg:
+		event := logstore.Event(msg)
+		if m.preview.matches(event) {
+			m.preview.refresh(m.services)
+		}
 		if m.log != nil {
-			event := logstore.Event(msg)
 			if event.Project == m.log.project && event.Process == m.log.process {
 				m.log.refresh(m.services)
 			}
 		}
 		return m, waitLogs(m.services.LogEvents)
 	case logstore.Event:
+		if m.preview.matches(msg) {
+			m.preview.refresh(m.services)
+		}
 		if m.log != nil && msg.Project == m.log.project && msg.Process == m.log.process {
 			m.log.refresh(m.services)
 		}
@@ -126,6 +146,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingConfig = config.Config{}
 		}
 		m.refresh()
+		m.refreshPreview()
 		if msg.action == shutdown && msg.err == nil {
 			return m, tea.Quit
 		}
@@ -152,6 +173,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.busy {
+			return m, nil
+		}
 		if m.form != nil {
 			if msg.Code == tea.KeyEscape {
 				m.form = nil
@@ -161,7 +185,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Code == 's' && msg.Mod == tea.ModCtrl {
 				cfg, err := m.form.config()
 				if err != nil {
-					m.form.err = err
 					m.err = err
 					return m, nil
 				}
@@ -174,9 +197,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.actionCommand(saveConfig)
 			}
 			return m, m.form.update(msg)
-		}
-		if m.busy {
-			return m, nil
 		}
 		if m.projectMenu {
 			switch msg.Code {
@@ -217,6 +237,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		beforeProject, beforeProcess, beforeSelected := m.selected()
 		m.refresh()
 		switch msg.Code {
 		case tea.KeyUp:
@@ -262,6 +283,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case 'q':
 			return m.requestShutdown()
 		}
+		afterProject, afterProcess, afterSelected := m.selected()
+		if beforeSelected != afterSelected || beforeProject != afterProject || beforeProcess != afterProcess {
+			m.refreshPreview()
+		}
 	}
 	m.clampSelection()
 	return m, nil
@@ -281,36 +306,49 @@ func (m Model) requestShutdown() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() tea.View {
+	content := renderDashboard(m.snapshot, m.projectIndex, m.processIndex, m.preview.render(), m.width, m.height)
 	if m.log != nil {
-		view := tea.NewView(m.log.render())
-		view.AltScreen = true
-		return view
+		content = m.log.render()
 	}
 	if m.form != nil {
-		view := tea.NewView(m.form.view())
-		view.AltScreen = true
-		return view
-	}
-	content := renderDashboard(m.snapshot, m.projectIndex, m.processIndex, m.width)
-	if m.pending != noAction {
-		content += "\n" + confirmStyle.Render("Confirm? [y/N]")
+		content = composeOverlay(lipgloss.NewStyle().Faint(true).Render(content), m.form.view(), m.width, m.height)
 	}
 	if m.projectMenu {
-		content += "\nProject: [s] start  [k] stop  [r] restart  [e] edit  [esc] cancel"
+		content = composeOverlay(content, renderProjectMenu(), m.width, m.height)
 	}
 	if m.addMenu {
-		content += "\nAdd: [p] project  [o] process  [esc] cancel"
+		content = composeOverlay(content, renderAddMenu(), m.width, m.height)
+	}
+	if m.pending != noAction {
+		content = composeOverlay(content, renderConfirmation(m.pending), m.width, m.height)
 	}
 	if m.busy {
-		content += "\nStopping processes…"
+		content = composeOverlay(content, renderBusy(), m.width, m.height)
 	}
-	if m.err != nil {
-		content += "\n" + errorStyle.Render(m.err.Error())
+	if m.err != nil && m.form == nil {
+		content = composeOverlay(content, renderOperationError(m.err), m.width, m.height)
 	}
-	content += "\n" + footer(m.width)
-	view := tea.NewView(content)
+	view := tea.NewView(fitScreen(content, m.width, m.height))
 	view.AltScreen = true
 	return view
+}
+
+func (m *Model) resizePreview() {
+	geometry := dashboardLayout(m.width, m.height)
+	m.preview.resize(
+		max(geometry.logWidth-paneFrameWidth-2*paneHorizontalPadding, 1),
+		geometry.logBodyHeight,
+	)
+}
+
+func (m *Model) refreshPreview() {
+	m.resizePreview()
+	project, name, ok := m.selected()
+	if !ok {
+		m.preview.show("", "", m.services)
+		return
+	}
+	m.preview.show(project, name, m.services)
 }
 
 func (m *Model) refresh() {

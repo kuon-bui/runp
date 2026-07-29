@@ -127,6 +127,8 @@ Merge order, last value wins:
 
 ## Keys
 
+Dashboard fills terminal with responsive project, process, PID, and selected-process live-log panes. Forms open as keyboard-controlled modal overlays; small terminals use full-screen forms.
+
 Dashboard:
 
 - Arrow keys: select process/project
@@ -150,7 +152,9 @@ Log viewer:
 
 Forms:
 
-- `Tab` / arrow keys: move or cycle values
+- `Up` / `Down`, `Tab` / `Shift+Tab`: move between controls
+- `Left` / `Right`: edit text at cursor or cycle selected values
+- `Home` / `End`, `Backspace` / `Delete`: edit focused text
 - `Space`: toggle focused boolean
 - `Enter`: set explicit environment key/value
 - `Ctrl+X`: delete explicit environment key

@@ -2,24 +2,32 @@ package tui_test
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
 
 	"runp/internal/config"
 	"runp/internal/controller"
+	"runp/internal/logstore"
 	"runp/internal/process"
 	"runp/internal/tui"
 )
+
+var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;:]*m`)
+
+func stripANSI(value string) string { return ansiPattern.ReplaceAllString(value, "") }
 
 func dashboardFixture() controller.Snapshot {
 	return controller.Snapshot{Projects: []controller.ProjectSnapshot{
 		{
 			Name: "shop",
 			Processes: []controller.ProcessSnapshot{
-				{Name: "api", Runtime: process.Snapshot{State: process.Running}},
+				{Name: "api", Runtime: process.Snapshot{State: process.Running, PID: 1832}},
 				{Name: "web", Runtime: process.Snapshot{State: process.Stopped}},
 			},
 		},
@@ -54,9 +62,112 @@ func TestDashboardResize(t *testing.T) {
 	model := tui.New(tui.Services{Snapshots: dashboardFixture})
 	model = updateModel(t, model, tea.WindowSizeMsg{Width: 60, Height: 20})
 	view := model.View()
-	plain := regexp.MustCompile(`\x1b\[[0-9;:]*m`).ReplaceAllString(view.Content, "")
-	if !view.AltScreen || !strings.Contains(plain, "RUNNING") || !strings.Contains(plain, "STOPPED") || strings.Index(plain, "shop") > strings.Index(plain, "tools") {
+	plain := stripANSI(view.Content)
+	if !view.AltScreen || !strings.Contains(plain, "RUNNING") || !strings.Contains(plain, "STOPPED") || !strings.Contains(plain, "shop") {
 		t.Fatalf("view = %#v", view)
+	}
+}
+
+func TestDashboardUsesWholeTerminalAndShowsPID(t *testing.T) {
+	model := tui.New(tui.Services{Snapshots: dashboardFixture})
+	model = updateModel(t, model, tea.WindowSizeMsg{Width: 120, Height: 30})
+	view := model.View().Content
+	if width, height := lipgloss.Size(view); width != 120 || height != 30 {
+		t.Fatalf("screen = %dx%d", width, height)
+	}
+	plain := stripANSI(view)
+	for _, want := range []string{"2 PROJECTS", "PROJECTS", "PROCESSES", "NAME", "STATE", "PID", "LIVE LOG", "1832", "—"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("view missing %q: %q", want, plain)
+		}
+	}
+}
+
+func TestDashboardBreakpoints(t *testing.T) {
+	tests := []struct {
+		name, marker string
+		width        int
+	}{
+		{name: "wide", width: 100, marker: "PROJECTS"},
+		{name: "medium", width: 99, marker: "SHOP"},
+		{name: "narrow", width: 69, marker: "PROCESSES · SHOP"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			model := tui.New(tui.Services{Snapshots: dashboardFixture})
+			model = updateModel(t, model, tea.WindowSizeMsg{Width: test.width, Height: 24})
+			plain := stripANSI(model.View().Content)
+			if !strings.Contains(plain, test.marker) {
+				t.Fatalf("view missing %q: %q", test.marker, plain)
+			}
+			if test.width < 70 && strings.Index(plain, "LIVE LOG") < strings.Index(plain, "PROCESSES · SHOP") {
+				t.Fatalf("narrow panes not vertical: %q", plain)
+			}
+		})
+	}
+}
+
+func TestDashboardFooterKeepsAllActionKeysVisible(t *testing.T) {
+	tests := []struct {
+		width int
+		want  []string
+	}{
+		{width: 60, want: []string{"Enter Log", "s k r g a e q"}},
+		{width: 120, want: []string{"Enter Log", "s Start", "k Stop", "r Restart", "g Project", "a Add", "e Edit", "q Quit"}},
+	}
+	for _, test := range tests {
+		model := tui.New(tui.Services{Snapshots: dashboardFixture})
+		model = updateModel(t, model, tea.WindowSizeMsg{Width: test.width, Height: 20})
+		lines := strings.Split(stripANSI(model.View().Content), "\n")
+		footer := lines[len(lines)-1]
+		for _, want := range test.want {
+			if !strings.Contains(footer, want) {
+				t.Fatalf("width %d footer missing %q: %q", test.width, want, footer)
+			}
+		}
+	}
+}
+
+func TestDashboardPreviewTracksSelectionAndEvents(t *testing.T) {
+	selected := ""
+	refreshes := 0
+	model := tui.New(tui.Services{
+		Snapshots: dashboardFixture,
+		LogSnapshot: func(_, process string) []logstore.Record {
+			selected = process
+			refreshes++
+			return []logstore.Record{{At: time.Unix(1, 0), Stream: logstore.Stdout, Text: process + " output"}}
+		},
+	})
+	if !strings.Contains(model.View().Content, "api output") {
+		t.Fatalf("initial preview = %q", model.View().Content)
+	}
+	model = updateModel(t, model, tea.KeyPressMsg{Code: tea.KeyRight})
+	if selected != "web" || !strings.Contains(model.View().Content, "web output") {
+		t.Fatalf("selection/preview = %q/%q", selected, model.View().Content)
+	}
+	beforeEvent := refreshes
+	model, _ = update(model, logstore.Event{Project: "shop", Process: "web"})
+	if refreshes != beforeEvent+1 {
+		t.Fatalf("event refreshes = %d, want %d", refreshes, beforeEvent+1)
+	}
+}
+
+func TestDashboardKeepsSelectedProjectVisible(t *testing.T) {
+	projects := make([]controller.ProjectSnapshot, 20)
+	for index := range projects {
+		projects[index] = controller.ProjectSnapshot{Name: fmt.Sprintf("project-%02d", index)}
+	}
+	model := tui.New(tui.Services{Snapshots: func() controller.Snapshot {
+		return controller.Snapshot{Projects: projects}
+	}})
+	model = updateModel(t, model, tea.WindowSizeMsg{Width: 100, Height: 10})
+	for range 19 {
+		model = updateModel(t, model, tea.KeyPressMsg{Code: tea.KeyDown})
+	}
+	plain := stripANSI(model.View().Content)
+	if !strings.Contains(plain, "› project-19") || strings.Contains(plain, "project-00") {
+		t.Fatalf("project viewport = %q", plain)
 	}
 }
 
@@ -110,7 +221,7 @@ func TestProjectActionMenu(t *testing.T) {
 		},
 	})
 	updated, cmd := model.Update(tea.KeyPressMsg{Code: 'g'})
-	if cmd != nil || !strings.Contains(updated.(tui.Model).View().Content, "Project:") {
+	if cmd != nil || !strings.Contains(updated.(tui.Model).View().Content, "PROJECT ACTIONS") {
 		t.Fatal("project menu missing")
 	}
 	_, cmd = updated.(tui.Model).Update(tea.KeyPressMsg{Code: 's'})
@@ -120,6 +231,46 @@ func TestProjectActionMenu(t *testing.T) {
 	_ = cmd()
 	if calls != 1 {
 		t.Fatalf("calls = %d", calls)
+	}
+}
+
+func TestProjectMenuRendersCenteredWithoutGrowingScreen(t *testing.T) {
+	model := tui.New(tui.Services{Snapshots: dashboardFixture})
+	model = updateModel(t, model, tea.WindowSizeMsg{Width: 100, Height: 24})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: 'g'})
+	view := model.View().Content
+	if width, height := lipgloss.Size(view); width != 100 || height != 24 {
+		t.Fatalf("screen = %dx%d", width, height)
+	}
+	lines := strings.Split(stripANSI(view), "\n")
+	menuLine := -1
+	for index, line := range lines {
+		if strings.Contains(line, "PROJECT ACTIONS") {
+			menuLine = index
+			break
+		}
+	}
+	if menuLine < 6 || menuLine > 16 {
+		t.Fatalf("menu row = %d", menuLine)
+	}
+}
+
+func TestOverlayBlocksDashboardNavigation(t *testing.T) {
+	model := tui.New(tui.Services{Snapshots: dashboardFixture})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: 'g'})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: tea.KeyRight})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if !strings.Contains(model.View().Content, "› api") {
+		t.Fatalf("dashboard moved behind menu: %q", model.View().Content)
+	}
+}
+
+func TestConfirmationUsesHighestVisualLayer(t *testing.T) {
+	model := tui.New(tui.Services{Snapshots: dashboardFixture})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: 'r'})
+	plain := stripANSI(model.View().Content)
+	if !strings.Contains(plain, "CONFIRM RESTART") || !strings.Contains(plain, "[y] Yes") {
+		t.Fatalf("confirmation = %q", plain)
 	}
 }
 
@@ -140,6 +291,86 @@ func TestProjectEditRoute(t *testing.T) {
 	}
 }
 
+func TestFormRendersAsModalOverDashboard(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: dir}}
+	model := tui.New(tui.Services{
+		Snapshots: func() controller.Snapshot {
+			return controller.Snapshot{Projects: []controller.ProjectSnapshot{{Name: "shop", Directory: dir}}}
+		},
+		Config: func() config.Config { return cfg },
+	})
+	model = updateModel(t, model, tea.WindowSizeMsg{Width: 100, Height: 24})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: 'g'})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: 'e'})
+	plain := stripANSI(model.View().Content)
+	if !strings.Contains(plain, "RUNP") || !strings.Contains(plain, "Edit project · shop") {
+		t.Fatalf("modal/background = %q", plain)
+	}
+	if width, height := lipgloss.Size(model.View().Content); width != 100 || height != 24 {
+		t.Fatalf("screen = %dx%d", width, height)
+	}
+}
+
+func TestDashboardInputBlockedWhileFormOpen(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: dir, Processes: []config.Process{{Name: "api", Command: "api"}, {Name: "web", Command: "web"}}}}
+	model := tui.New(tui.Services{Snapshots: dashboardFixture, Config: func() config.Config { return cfg }})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: 'e'})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: tea.KeyRight})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if !strings.Contains(model.View().Content, "› api") {
+		t.Fatalf("dashboard moved behind form: %q", model.View().Content)
+	}
+}
+
+func TestBusySaveBlocksFormInput(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: dir, Processes: []config.Process{{Name: "api", Command: "api"}}}}
+	model := tui.New(tui.Services{
+		Snapshots: dashboardFixture,
+		Config:    func() config.Config { return cfg },
+		SaveConfig: func(config.Config) error {
+			return nil
+		},
+	})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: 'e'})
+	saving, cmd := model.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("save command missing")
+	}
+	blocked, _ := saving.(tui.Model).Update(tea.KeyPressMsg{Code: 'X', Text: "X"})
+	blocked, _ = blocked.(tui.Model).Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	view := blocked.(tui.Model).View().Content
+	if !strings.Contains(view, "WORKING") || !strings.Contains(view, "Edit process · api") {
+		t.Fatalf("busy layer accepted form input: %q", blocked.(tui.Model).View().Content)
+	}
+}
+
+func TestMatchingLogEventRefreshesPreviewBehindForm(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: dir, Processes: []config.Process{{Name: "api", Command: "api"}}}}
+	records := []logstore.Record{{At: time.Unix(1, 0), Stream: logstore.Stdout, Text: "before"}}
+	model := tui.New(tui.Services{
+		Snapshots: dashboardFixture,
+		Config:    func() config.Config { return cfg },
+		LogSnapshot: func(string, string) []logstore.Record {
+			return records
+		},
+	})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: 'e'})
+	records = []logstore.Record{{At: time.Unix(2, 0), Stream: logstore.Stdout, Text: "after"}}
+	model, _ = update(model, logstore.Event{Project: "shop", Process: "api", Records: records})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if !strings.Contains(model.View().Content, "after") {
+		t.Fatalf("preview did not refresh behind form: %q", model.View().Content)
+	}
+}
+
 func TestQuitConfirmsOnlyWithActiveProcesses(t *testing.T) {
 	calls := 0
 	services := tui.Services{
@@ -151,7 +382,7 @@ func TestQuitConfirmsOnlyWithActiveProcesses(t *testing.T) {
 	}
 	active := tui.New(services)
 	updated, cmd := active.Update(tea.KeyPressMsg{Code: 'q'})
-	if cmd != nil || !strings.Contains(updated.(tui.Model).View().Content, "Confirm?") {
+	if cmd != nil || !strings.Contains(updated.(tui.Model).View().Content, "CONFIRM SHUTDOWN") {
 		t.Fatal("active quit skipped confirmation")
 	}
 
@@ -183,7 +414,7 @@ func TestShutdownRequestSkipsConfirmationAndWaitsForCleanup(t *testing.T) {
 		},
 	})
 	updated, cmd := model.Update(tui.ShutdownRequestMsg{})
-	if cmd == nil || strings.Contains(updated.(tui.Model).View().Content, "Confirm?") {
+	if cmd == nil || strings.Contains(updated.(tui.Model).View().Content, "CONFIRM SHUTDOWN") {
 		t.Fatal("signal shutdown did not start immediately")
 	}
 	done := make(chan tea.Msg, 1)

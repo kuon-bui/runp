@@ -15,6 +15,7 @@ import (
 
 	"runp/internal/config"
 	"runp/internal/controller"
+	"runp/internal/logstore"
 	"runp/internal/process"
 )
 
@@ -224,7 +225,7 @@ func TestProcessFormRendersWideSidebarAndOnlyActiveSection(t *testing.T) {
 	form.resize(100, 30)
 	form.toggle("Autostart")
 	view := form.view()
-	for _, want := range []string{"New process", "▸ Basic", "Command", "Arguments", "✓", "Autostart"} {
+	for _, want := range []string{"New process", "▸ Basic", "Command", "Arguments"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view missing %q: %q", want, view)
 		}
@@ -280,6 +281,64 @@ func TestFormRenderedWidthNeverExceedsTinyTerminal(t *testing.T) {
 	}
 }
 
+func TestFormTinyFallbackUsesWholeTerminal(t *testing.T) {
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
+	form, err := newProcessForm(cfg, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	form.resize(8, 5)
+	if width, height := lipgloss.Size(form.view()); width != 8 || height != 5 {
+		t.Fatalf("form = %dx%d, want 8x5", width, height)
+	}
+}
+
+func TestModalSizeUsesMarginAndTinyFallback(t *testing.T) {
+	tests := []struct {
+		width, height         int
+		wantWidth, wantHeight int
+	}{
+		{width: 120, height: 30, wantWidth: 90, wantHeight: 26},
+		{width: 70, height: 20, wantWidth: 66, wantHeight: 16},
+		{width: 59, height: 20, wantWidth: 59, wantHeight: 20},
+		{width: 80, height: 15, wantWidth: 80, wantHeight: 15},
+	}
+	for _, test := range tests {
+		width, height := modalSize(test.width, test.height)
+		if width != test.wantWidth || height != test.wantHeight {
+			t.Fatalf("modal %dx%d = %dx%d", test.width, test.height, width, height)
+		}
+	}
+}
+
+func TestFormModalUsesCalculatedSize(t *testing.T) {
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
+	form, err := newProcessForm(cfg, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	form.resize(100, 24)
+	if width, height := lipgloss.Size(form.view()); width != 90 || height != 20 {
+		t.Fatalf("form = %dx%d, want 90x20", width, height)
+	}
+}
+
+func TestFormViewportKeepsFocusedControlVisible(t *testing.T) {
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
+	form, _ := newProcessForm(cfg, 0, -1)
+	form.resize(70, 16)
+	for form.focusLabel() != toggleAutostart {
+		form.moveFocus(1)
+	}
+	view := form.view()
+	if form.body.YOffset() == 0 || !strings.Contains(view, "Autostart") {
+		t.Fatalf("focused control clipped: %q", view)
+	}
+}
+
 func TestProcessFormRendersFriendlyEnumAndToggleControls(t *testing.T) {
 	cfg := config.Default()
 	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
@@ -326,6 +385,98 @@ func TestProcessFormEnumKeysCycleAndWrap(t *testing.T) {
 				t.Fatalf("value = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+func TestTextArrowsEditAtCursorWithoutChangingField(t *testing.T) {
+	form, err := newProjectForm(config.Default(), -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	form.set(fieldName, "abcd")
+	index := form.fieldIndex(fieldName)
+	form.fields[index].input.SetCursor(2)
+	form.update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	form.update(tea.KeyPressMsg{Code: 'X', Text: "X"})
+	if got := form.value(fieldName); got != "aXbcd" {
+		t.Fatalf("value = %q", got)
+	}
+	if form.focusLabel() != fieldName {
+		t.Fatalf("focus = %q", form.focusLabel())
+	}
+}
+
+func TestTextHomeEndAndDeleteEditAroundCursor(t *testing.T) {
+	form, _ := newProjectForm(config.Default(), -1)
+	form.set(fieldName, "abcd")
+	form.update(tea.KeyPressMsg{Code: tea.KeyHome})
+	form.update(tea.KeyPressMsg{Code: tea.KeyDelete})
+	form.update(tea.KeyPressMsg{Code: tea.KeyEnd})
+	form.update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if got := form.value(fieldName); got != "bc" {
+		t.Fatalf("value = %q", got)
+	}
+}
+
+func TestUpDownNavigateWhileEnumArrowsCycle(t *testing.T) {
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
+	form, _ := newProcessForm(cfg, 0, -1)
+	for form.focusLabel() != fieldHealthType {
+		form.moveFocus(1)
+	}
+	form.set(fieldHealthType, config.HealthProcess)
+	form.update(tea.KeyPressMsg{Code: tea.KeyRight})
+	if got := form.value(fieldHealthType); got != config.HealthHTTP {
+		t.Fatalf("health type = %q", got)
+	}
+	form.update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if form.focusLabel() != "HealthURL" {
+		t.Fatalf("focus = %q", form.focusLabel())
+	}
+}
+
+func TestFormAttachesParseErrorToField(t *testing.T) {
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
+	form, _ := newProcessForm(cfg, 0, -1)
+	form.set(fieldArgs, "not-json")
+	_, err := form.config()
+	if err == nil || form.fieldErrors[fieldArgs] == nil {
+		t.Fatalf("error/fields = %v/%#v", err, form.fieldErrors)
+	}
+	field := form.fields[form.fieldIndex(fieldArgs)]
+	if rendered := form.renderField(field, 60); !strings.Contains(rendered, "args:") {
+		t.Fatalf("field error hidden: %q", rendered)
+	}
+}
+
+func TestFormRevealsFieldWithParseError(t *testing.T) {
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
+	form, _ := newProcessForm(cfg, 0, -1)
+	form.set(fieldArgs, "not-json")
+	for form.focusLabel() != fieldHealthType {
+		form.moveFocus(1)
+	}
+	if _, err := form.config(); err == nil {
+		t.Fatal("missing parse error")
+	}
+	if form.focusLabel() != fieldArgs || !strings.Contains(form.view(), "args:") {
+		t.Fatalf("parse error hidden on %q: %q", form.focusLabel(), form.view())
+	}
+}
+
+func TestFormKeepsCrossFieldErrorInSummary(t *testing.T) {
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
+	form, _ := newProcessForm(cfg, 0, -1)
+	form.set("Command", "echo hi")
+	form.set(fieldArgs, `["bad"]`)
+	form.toggle(toggleShell)
+	_, err := form.config()
+	if err == nil || form.err == nil || len(form.fieldErrors) != 0 {
+		t.Fatalf("error/summary/fields = %v/%v/%#v", err, form.err, form.fieldErrors)
 	}
 }
 
@@ -408,7 +559,7 @@ func TestFormKeyboardTogglesFocusableBooleans(t *testing.T) {
 		form.update(tea.KeyPressMsg{Code: tea.KeyTab})
 	}
 	form.update(tea.KeyPressMsg{Code: ' '})
-	if !form.booleans["Shell"] || !strings.Contains(form.view(), "✓ Shell") {
+	if !form.booleans["Shell"] || !strings.Contains(form.view(), "[ ON  ] Shell") {
 		t.Fatalf("form = %q", form.view())
 	}
 	form.update(tea.KeyPressMsg{Code: tea.KeyTab})
@@ -454,6 +605,41 @@ func TestActiveProcessNeutralEditSavesWithoutStop(t *testing.T) {
 	_ = cmd()
 	if !reflect.DeepEqual(calls, []string{"save"}) {
 		t.Fatalf("calls = %#v", calls)
+	}
+}
+
+func TestProcessRenameRetargetsPreviewAfterSave(t *testing.T) {
+	dir := t.TempDir()
+	cfg := formConfig(dir)
+	selected := ""
+	model := New(Services{
+		Snapshots: func() controller.Snapshot {
+			item := cfg.Projects[0].Processes[0]
+			return controller.Snapshot{Projects: []controller.ProjectSnapshot{{
+				Name:      cfg.Projects[0].Name,
+				Processes: []controller.ProcessSnapshot{{Name: item.Name, Runtime: process.Snapshot{State: process.Stopped}}},
+			}}}
+		},
+		Config: func() config.Config { return cfg },
+		SaveConfig: func(got config.Config) error {
+			cfg = got
+			return nil
+		},
+		LogSnapshot: func(_, name string) []logstore.Record {
+			selected = name
+			return nil
+		},
+	})
+	opened, _ := model.Update(tea.KeyPressMsg{Code: 'e'})
+	editing := opened.(Model)
+	editing.form.set(fieldName, "worker")
+	saving, cmd := editing.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("save command missing")
+	}
+	_, _ = saving.(Model).Update(cmd())
+	if selected != "worker" {
+		t.Fatalf("preview selection = %q", selected)
 	}
 }
 

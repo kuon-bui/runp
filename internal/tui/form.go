@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
@@ -90,9 +92,32 @@ type editForm struct {
 	focus        int
 	workingEnv   map[string]string
 	err          error
+	fieldErrors  map[string]error
+	body         viewport.Model
 	width        int
 	height       int
 	creating     bool
+}
+
+const (
+	modalMaxWidth      = 90
+	modalMinimumWidth  = 60
+	modalMinimumHeight = 16
+	modalMargin        = 4
+)
+
+func modalSize(terminalWidth, terminalHeight int) (int, int) {
+	terminalWidth, terminalHeight = max(terminalWidth, 1), max(terminalHeight, 1)
+	if terminalWidth < modalMinimumWidth || terminalHeight < modalMinimumHeight {
+		return terminalWidth, terminalHeight
+	}
+	return min(modalMaxWidth, terminalWidth-modalMargin), terminalHeight - modalMargin
+}
+
+func newFormBody() viewport.Model {
+	body := viewport.New(viewport.WithWidth(1), viewport.WithHeight(1))
+	body.FillHeight = true
+	return body
 }
 
 func (f *editForm) sections() []formSection {
@@ -167,6 +192,8 @@ func newProjectForm(cfg config.Config, projectIndex int) (*editForm, error) {
 		projectIndex: projectIndex,
 		processIndex: -1,
 		booleans:     map[string]bool{toggleAutostart: project.Autostart},
+		fieldErrors:  make(map[string]error),
+		body:         newFormBody(),
 		toggles:      []formToggle{{label: toggleAutostart, display: toggleAutostart, section: basicSection}},
 		width:        defaultTerminalWidth,
 		height:       defaultTerminalHeight,
@@ -204,6 +231,8 @@ func newProcessForm(cfg config.Config, projectIndex, processIndex int) (*editFor
 		processIndex: processIndex,
 		booleans:     map[string]bool{toggleShell: item.Shell, toggleAutostart: item.Autostart},
 		workingEnv:   cloneMap(item.Env),
+		fieldErrors:  make(map[string]error),
+		body:         newFormBody(),
 		width:        defaultTerminalWidth,
 		height:       defaultTerminalHeight,
 		creating:     creating,
@@ -334,16 +363,22 @@ func (f *editForm) update(msg tea.Msg) tea.Cmd {
 				return nil
 			}
 		case tea.KeyLeft:
-			f.cycleEnum(-1)
-			return nil
+			if isEnumField(f.focusLabel()) {
+				f.cycleEnum(-1)
+				return nil
+			}
 		case tea.KeyRight:
-			f.cycleEnum(1)
-			return nil
+			if isEnumField(f.focusLabel()) {
+				f.cycleEnum(1)
+				return nil
+			}
 		}
 		label := f.focusLabel()
-		if label == fieldHealthType || label == fieldRestartPolicy {
+		if isEnumField(label) {
 			return nil
 		}
+		delete(f.fieldErrors, label)
+		f.err = nil
 	}
 	index := f.fieldIndex(f.focusLabel())
 	if index < 0 {
@@ -352,6 +387,10 @@ func (f *editForm) update(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	f.fields[index].input, cmd = f.fields[index].input.Update(msg)
 	return cmd
+}
+
+func isEnumField(label string) bool {
+	return label == fieldHealthType || label == fieldRestartPolicy
 }
 
 func (f *editForm) setEnvValue() {
@@ -385,6 +424,22 @@ func (f *editForm) moveFocus(delta int) {
 	f.focus = (f.focus + delta + count) % count
 	if index := f.fieldIndex(f.focusLabel()); index >= 0 {
 		_ = f.fields[index].input.Focus()
+	}
+}
+
+func (f *editForm) focusControl(label string) {
+	if index := f.fieldIndex(f.focusLabel()); index >= 0 {
+		f.fields[index].input.Blur()
+	}
+	for index, candidate := range f.focusLabels() {
+		if candidate != label {
+			continue
+		}
+		f.focus = index
+		if fieldIndex := f.fieldIndex(label); fieldIndex >= 0 {
+			_ = f.fields[fieldIndex].input.Focus()
+		}
+		return
 	}
 }
 
@@ -436,29 +491,52 @@ func (f *editForm) header() string {
 }
 
 func (f *editForm) view() string {
-	if f.width < 9 {
-		return formHeaderStyle.MaxWidth(f.width).Render(f.header())
-	}
-	width := max(f.width-formOuterInset, 1)
-	bodyWidth := max(width-formInnerInset, 1)
-	var body string
-	if f.kind == processForm && f.width >= wideFormBreakpoint {
-		sidebar := f.renderSidebar(formSidebarWidth)
-		panelWidth := max(bodyWidth-lipgloss.Width(sidebar)-panelGap, minimumPanelWidth)
-		body = lipgloss.JoinHorizontal(lipgloss.Top, sidebar, "  ", f.renderPanel(panelWidth))
-	} else {
-		if f.kind == processForm {
-			body = f.renderTabs(bodyWidth) + "\n\n"
-		}
-		body += f.renderPanel(bodyWidth)
-	}
-
-	content := formHeaderStyle.Render(f.header()) + "\n" + formMutedStyle.Render(f.activeSection().String()) + "\n\n" + body
+	modalWidth, modalHeight := modalSize(f.width, f.height)
+	innerWidth := max(modalWidth-formModalStyle.GetHorizontalFrameSize(), 1)
+	innerHeight := max(modalHeight-formModalStyle.GetVerticalFrameSize(), 1)
+	header := formHeaderStyle.MaxWidth(innerWidth).Render(f.header())
+	footer := formMutedStyle.MaxWidth(innerWidth).Render(f.footer())
+	errorLine := ""
+	errorHeight := 0
 	if f.err != nil {
-		content += "\n" + formErrorStyle.Width(max(bodyWidth-2, 1)).Render(f.err.Error())
+		errorLine = formErrorStyle.MaxWidth(innerWidth).MaxHeight(1).Render(f.err.Error())
+		errorHeight = 1
 	}
-	content += "\n\n" + formMutedStyle.Render(f.footer())
-	return formFrameStyle.Width(width).Render(content)
+	wide := f.kind == processForm && modalWidth >= wideFormBreakpoint
+	navigationHeight := 0
+	if f.kind == processForm && !wide {
+		navigationHeight = 1
+	}
+	bodyHeight := max(innerHeight-2-navigationHeight-errorHeight, 1)
+	panelWidth := innerWidth
+	var body string
+	if wide {
+		sidebar := f.renderSidebar(formSidebarWidth)
+		panelWidth = max(innerWidth-lipgloss.Width(sidebar)-panelGap, 1)
+		f.syncBody(panelWidth, bodyHeight)
+		body = lipgloss.JoinHorizontal(lipgloss.Top, sidebar, strings.Repeat(" ", panelGap), f.body.View())
+	} else {
+		f.syncBody(panelWidth, bodyHeight)
+		body = f.body.View()
+		if f.kind == processForm {
+			body = formMutedStyle.MaxWidth(innerWidth).MaxHeight(1).Render(f.renderTabs(innerWidth)) + "\n" + body
+		}
+	}
+	parts := []string{header, body}
+	if errorLine != "" {
+		parts = append(parts, errorLine)
+	}
+	parts = append(parts, footer)
+	content := lipgloss.NewStyle().
+		Width(innerWidth).Height(innerHeight).
+		MaxWidth(innerWidth).MaxHeight(innerHeight).
+		Render(strings.Join(parts, "\n"))
+	if modalWidth < 3 || modalHeight < 3 {
+		return fitScreen(content, modalWidth, modalHeight)
+	}
+	return formModalStyle.
+		Width(modalWidth).Height(modalHeight).
+		Render(content)
 }
 
 func (f *editForm) renderSidebar(width int) string {
@@ -488,20 +566,51 @@ func (f *editForm) renderTabs(_ int) string {
 	return strings.Join(sections, " ")
 }
 
-func (f *editForm) renderPanel(width int) string {
-	controls := make([]string, 0)
+type controlRange struct{ start, end int }
+
+func (f *editForm) panelContent(width int) (string, map[string]controlRange) {
+	parts := make([]string, 0)
+	ranges := make(map[string]controlRange)
+	line := 0
 	active := f.activeSection()
 	for _, field := range f.fields {
-		if field.section == active {
-			controls = append(controls, f.renderField(field, width))
+		if field.section != active {
+			continue
 		}
+		rendered := f.renderField(field, width)
+		height := lipgloss.Height(rendered)
+		ranges[field.label] = controlRange{start: line, end: line + height - 1}
+		parts = append(parts, rendered)
+		line += height + 1
 	}
 	for _, toggle := range f.toggles {
-		if toggle.section == active {
-			controls = append(controls, f.renderToggle(toggle))
+		if toggle.section != active {
+			continue
 		}
+		rendered := f.renderToggle(toggle)
+		ranges[toggle.label] = controlRange{start: line, end: line}
+		parts = append(parts, rendered)
+		line += 2
 	}
-	return strings.Join(controls, "\n\n")
+	return strings.Join(parts, "\n\n"), ranges
+}
+
+func (f *editForm) syncBody(width, height int) {
+	content, ranges := f.panelContent(width)
+	f.body.SetWidth(max(width, 1))
+	f.body.SetHeight(max(height, 1))
+	f.body.SetContent(content)
+	focused, ok := ranges[f.focusLabel()]
+	if !ok {
+		return
+	}
+	offset := f.body.YOffset()
+	if focused.start < offset {
+		offset = focused.start
+	} else if focused.end >= offset+f.body.Height() {
+		offset = focused.end - f.body.Height() + 1
+	}
+	f.body.SetYOffset(max(offset, 0))
 }
 
 func (f *editForm) renderField(field formField, width int) string {
@@ -512,13 +621,16 @@ func (f *editForm) renderField(field formField, width int) string {
 	input.SetCursor(input.Position())
 	value := input.View()
 	if field.label == fieldHealthType || field.label == fieldRestartPolicy {
-		value = "‹ " + field.input.Value() + " ›"
+		value = "SELECT  ‹ " + field.input.Value() + " ›"
 	}
 	style := formInputStyle
 	if focused {
 		style = formFocusedInputStyle
 	}
 	result := label + "\n" + style.Width(max(width-4, 1)).Render(value)
+	if err := f.fieldErrors[field.label]; err != nil {
+		result += "\n" + formInlineErrorStyle.Render(err.Error())
+	}
 	if field.label != fieldEnvKey {
 		return result
 	}
@@ -528,17 +640,17 @@ func (f *editForm) renderField(field formField, width int) string {
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		result += "\n" + formMutedStyle.Render(key+"=••••")
+		result += "\n" + formMutedStyle.Render(key+"  ••••  Ctrl+X delete")
 	}
 	return result
 }
 
 func (f *editForm) renderToggle(toggle formToggle) string {
-	marker := "○"
-	style := formToggleStyle
+	marker := "[ OFF ]"
+	style := formSwitchStyle
 	if f.booleans[toggle.label] {
-		marker = "✓"
-		style = formEnabledToggleStyle
+		marker = "[ ON  ]"
+		style = formEnabledSwitchStyle
 	}
 	if f.focusLabel() == toggle.label {
 		style = style.Foreground(lipgloss.Color(colorAccent)).Bold(true)
@@ -555,14 +667,40 @@ func (f *editForm) footer() string {
 }
 
 func (f *editForm) config() (config.Config, error) {
+	f.clearErrors()
 	result, err := f.configWithoutValidation()
 	if err != nil {
+		var fieldErr formFieldError
+		if errors.As(err, &fieldErr) {
+			f.fieldErrors[fieldErr.label] = fieldErr.err
+			f.focusControl(fieldErr.label)
+		} else {
+			f.err = err
+		}
 		return config.Config{}, err
 	}
 	if err := result.Validate(); err != nil {
+		f.err = err
 		return config.Config{}, err
 	}
 	return result, nil
+}
+
+type formFieldError struct {
+	label string
+	err   error
+}
+
+func (e formFieldError) Error() string { return e.err.Error() }
+func (e formFieldError) Unwrap() error { return e.err }
+
+func fieldFailure(label string, err error) error {
+	return formFieldError{label: label, err: err}
+}
+
+func (f *editForm) clearErrors() {
+	clear(f.fieldErrors)
+	f.err = nil
 }
 
 func (f *editForm) configWithoutValidation() (config.Config, error) {
@@ -586,7 +724,7 @@ func (f *editForm) configWithoutValidation() (config.Config, error) {
 	item.EnvFile = strings.TrimSpace(f.value("EnvFile"))
 	item.Autostart = f.booleans[toggleAutostart]
 	if err := parseJSONField("args", f.value(fieldArgs), &item.Args); err != nil {
-		return config.Config{}, err
+		return config.Config{}, fieldFailure(fieldArgs, err)
 	}
 	if item.Args == nil {
 		item.Args = nil
@@ -605,35 +743,35 @@ func (f *editForm) configWithoutValidation() (config.Config, error) {
 	item.Health.URL = strings.TrimSpace(f.value("HealthURL"))
 	item.Health.Address = strings.TrimSpace(f.value("HealthAddress"))
 	if item.Health.Timeout, err = parseDurationField("health timeout", f.value("HealthTimeout")); err != nil {
-		return config.Config{}, err
+		return config.Config{}, fieldFailure("HealthTimeout", err)
 	}
 	if item.Health.Interval, err = parseDurationField("health interval", f.value("HealthInterval")); err != nil {
-		return config.Config{}, err
+		return config.Config{}, fieldFailure("HealthInterval", err)
 	}
 	item.Restart.Policy = strings.TrimSpace(f.value(fieldRestartPolicy))
 	if item.Restart.MaxAttempts, err = parseIntField("restart max attempts", f.value("RestartMaxAttempts")); err != nil {
-		return config.Config{}, err
+		return config.Config{}, fieldFailure("RestartMaxAttempts", err)
 	}
 	if item.Restart.Window, err = parseDurationField("restart window", f.value("RestartWindow")); err != nil {
-		return config.Config{}, err
+		return config.Config{}, fieldFailure("RestartWindow", err)
 	}
 	if item.Restart.InitialBackoff, err = parseDurationField("initial backoff", f.value("InitialBackoff")); err != nil {
-		return config.Config{}, err
+		return config.Config{}, fieldFailure("InitialBackoff", err)
 	}
 	if item.Restart.MaxBackoff, err = parseDurationField("max backoff", f.value("MaxBackoff")); err != nil {
-		return config.Config{}, err
+		return config.Config{}, fieldFailure("MaxBackoff", err)
 	}
 	if item.Log.MaxSizeMB, err = parseIntField("log max size", f.value("LogMaxSizeMB")); err != nil {
-		return config.Config{}, err
+		return config.Config{}, fieldFailure("LogMaxSizeMB", err)
 	}
 	if item.Log.MaxFiles, err = parseIntField("log max files", f.value("LogMaxFiles")); err != nil {
-		return config.Config{}, err
+		return config.Config{}, fieldFailure("LogMaxFiles", err)
 	}
 	if item.Log.BufferLines, err = parseIntField("log buffer lines", f.value("LogBufferLines")); err != nil {
-		return config.Config{}, err
+		return config.Config{}, fieldFailure("LogBufferLines", err)
 	}
 	if item.StopTimeout, err = parseDurationField("stop timeout", f.value("StopTimeout")); err != nil {
-		return config.Config{}, err
+		return config.Config{}, fieldFailure("StopTimeout", err)
 	}
 	return result, nil
 }

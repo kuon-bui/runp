@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
 
 	"runp/internal/controller"
 	"runp/internal/logstore"
@@ -75,6 +76,34 @@ func TestLogFollow(t *testing.T) {
 	}
 }
 
+func TestLogViewerUsesOperationsChromeAndWholeTerminal(t *testing.T) {
+	model := logModelWithRecords([]logstore.Record{{
+		At: time.Unix(1, 0), Stream: logstore.Stdout, Text: "ready",
+	}})
+	model = updateModel(t, model, tea.WindowSizeMsg{Width: 90, Height: 22})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
+	view := model.View().Content
+	if width, height := lipgloss.Size(view); width != 90 || height != 22 {
+		t.Fatalf("screen = %dx%d", width, height)
+	}
+	plain := stripANSI(view)
+	for _, want := range []string{"RUNP", "SHOP / API", "BOTH", "FOLLOW", "LOG OUTPUT", "ready", "[f] Follow", "[/] Search"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("view missing %q: %q", want, plain)
+		}
+	}
+}
+
+func TestLogSearchKeepsWholeTerminal(t *testing.T) {
+	model := logModelWithRecords(nil)
+	model = updateModel(t, model, tea.WindowSizeMsg{Width: 60, Height: 16})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: '/'})
+	if width, height := lipgloss.Size(model.View().Content); width != 60 || height != 16 {
+		t.Fatalf("search screen = %dx%d", width, height)
+	}
+}
+
 func TestCtrlCQuitsFromLogViewer(t *testing.T) {
 	model := tui.New(tui.Services{
 		Snapshots:   dashboardFixture,
@@ -82,7 +111,7 @@ func TestCtrlCQuitsFromLogViewer(t *testing.T) {
 	})
 	opened, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	quitting, cmd := opened.(tui.Model).Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
-	if cmd != nil || !strings.Contains(quitting.(tui.Model).View().Content, "Confirm?") {
+	if cmd != nil || !strings.Contains(quitting.(tui.Model).View().Content, "CONFIRM SHUTDOWN") {
 		t.Fatal("Ctrl+C ignored in log viewer")
 	}
 }
