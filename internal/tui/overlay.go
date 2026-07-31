@@ -26,6 +26,43 @@ func renderAddMenu() string {
 		"\n\n[p] Project  [o] Process\n[Esc] Cancel")
 }
 
+func renderShortcuts() string {
+	dashboard := renderShortcutSection("DASHBOARD", `[↑↓/←→] Move
+[Enter] Open logs
+[s/k/r] Start / Stop / Restart
+[g/a/e] Project menu / Add / Edit
+[?] Open or close shortcuts
+[q/Ctrl+C] Quit`)
+	logs := renderShortcutSection("LOGS & SEARCH", `[Esc] Back
+[f/t] Follow / Stream
+[/] Search
+[n/N] Next / Previous match
+[↑↓/PgUp/PgDn] Scroll
+[Enter/Esc] Apply / Cancel search`)
+	form := renderShortcutSection("FORM", `[Ctrl+S/Esc] Save / Cancel
+[Tab/Shift+Tab/↑↓] Move field
+[←→] Change choice
+[Space] Toggle
+[Enter] Set environment
+[Ctrl+X] Delete environment`)
+	menus := renderShortcutSection("MENUS & CONFIRM", `[s/k/r] Start / Stop / Restart project
+[e] Edit project
+[p] Add project
+[o] Add process
+[Esc/g/a] Close menu
+[y/n/Esc] Confirm / Cancel`)
+	sections := lipgloss.JoinHorizontal(lipgloss.Top,
+		lipgloss.JoinVertical(lipgloss.Left, dashboard, logs),
+		"  ",
+		lipgloss.JoinVertical(lipgloss.Left, form, menus),
+	)
+	return overlayStyle.Render(overlayTitleStyle.Render("KEYBOARD SHORTCUTS") + "\n" + sections)
+}
+
+func renderShortcutSection(title, shortcuts string) string {
+	return shortcutSectionStyle.Render(paneTitleStyle.Render(title) + "\n" + shortcuts)
+}
+
 func renderConfirmation(current action) string {
 	name := "ACTION"
 	switch current {

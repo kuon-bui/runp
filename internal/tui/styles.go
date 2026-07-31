@@ -49,6 +49,10 @@ var (
 				BorderForeground(lipgloss.Color(colorMuted)).
 				Padding(1, 2)
 	overlayTitleStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorAccent))
+	shortcutSectionStyle  = lipgloss.NewStyle().Width(44).
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderForeground(lipgloss.Color(colorMuted)).
+			Padding(0, 1)
 	confirmTitleStyle      = overlayTitleStyle.Foreground(lipgloss.Color(colorWarning))
 	formHeaderStyle        = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorAccent))
 	formMutedStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMuted))
