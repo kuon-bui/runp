@@ -1,6 +1,10 @@
 package tui
 
-import lipgloss "charm.land/lipgloss/v2"
+import (
+	"strings"
+
+	lipgloss "charm.land/lipgloss/v2"
+)
 
 func composeOverlay(background, foreground string, width, height int) string {
 	width, height = max(width, 1), max(height, 1)
@@ -21,9 +25,18 @@ func renderProjectMenu() string {
 		"\n\n[s] Start  [k] Stop  [r] Restart  [e] Edit\n[Esc] Cancel")
 }
 
-func renderAddMenu() string {
-	return overlayStyle.Render(overlayTitleStyle.Render("ADD") +
-		"\n\n[p] Project  [o] Process\n[Esc] Cancel")
+func renderAddMenu(selected int) string {
+	items := []string{"[p] Project", "[o] Process", "[Esc] Cancel"}
+	for index := range items {
+		prefix := "  "
+		if index == selected {
+			prefix = "› "
+			items[index] = selectionStyle.Render(prefix + items[index])
+			continue
+		}
+		items[index] = prefix + items[index]
+	}
+	return overlayStyle.Render(overlayTitleStyle.Render("ADD") + "\n\n" + strings.Join(items, "\n\n"))
 }
 
 func renderShortcuts() string {
@@ -72,6 +85,8 @@ func renderConfirmation(current action) string {
 		name = "RESTART"
 	case shutdown:
 		name = "SHUTDOWN"
+	case clearLog:
+		name = "CLEAR LOG"
 	case saveCritical:
 		name = "SAVE AND RESTART"
 	}

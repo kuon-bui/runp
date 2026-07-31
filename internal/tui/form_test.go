@@ -100,6 +100,27 @@ func TestProjectFormSaveAndEscape(t *testing.T) {
 	}
 }
 
+func TestAddMenuSupportsArrowSelectionAndEnter(t *testing.T) {
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
+	model := New(Services{
+		Snapshots: func() controller.Snapshot {
+			return controller.Snapshot{Projects: []controller.ProjectSnapshot{{Name: "shop"}}}
+		},
+		Config: func() config.Config { return cfg },
+	})
+
+	opened, _ := model.Update(tea.KeyPressMsg{Code: 'a'})
+	selected, _ := opened.(Model).Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if selected.(Model).addMenuIndex != 1 {
+		t.Fatalf("selection = %d", selected.(Model).addMenuIndex)
+	}
+	activated, _ := selected.(Model).Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if activated.(Model).form == nil || activated.(Model).form.kind != processForm {
+		t.Fatal("Enter did not open selected process form")
+	}
+}
+
 func TestNewProcessSaveDoesNotReadMissingRuntimeSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()

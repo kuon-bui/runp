@@ -250,13 +250,15 @@ func renderDashboard(snapshot controller.Snapshot, projectIndex, processIndex in
 }
 
 func footer(width int) string {
-	full := "↑↓ Project  ←→ Process  Enter Log  s Start  k Stop  r Restart  g Project  a Add  e Edit  ? Help  q Quit"
+	full := "↑↓ Project  ←→ Process  Enter Log  s Start  k Stop  r Restart  c Clear log  g Project  a Add  e Edit  q Quit"
 	if lipgloss.Width(full) <= width {
 		return full
 	}
-	compact := "↑↓ Project  ←→ Process  Enter Log  s k r g a e ? q"
+
+	compact := "↑↓ Project  ←→ Process  Enter Log  s k r c g a e q"
 	if lipgloss.Width(compact) <= width {
 		return compact
 	}
-	return "↑↓ ←→ Enter s k r g a e ? q"
+
+	return "↑↓ ←→ Enter s k r c g a e q"
 }

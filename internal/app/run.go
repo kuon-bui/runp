@@ -81,6 +81,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		LogEvents:      logs.Events(),
 		LogSnapshot:    logs.Snapshot,
 		LogQuery:       logs.Query,
+		ClearLog:       logs.Clear,
 		StartProcess:   control.StartProcess,
 		StopProcess:    control.StopProcess,
 		RestartProcess: control.RestartProcess,

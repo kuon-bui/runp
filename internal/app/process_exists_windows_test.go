@@ -9,6 +9,8 @@ func processExists(pid int) bool {
 	if err != nil {
 		return false
 	}
-	_ = windows.CloseHandle(handle)
-	return true
+
+	defer windows.CloseHandle(handle)
+	var exitCode uint32
+	return windows.GetExitCodeProcess(handle, &exitCode) == nil && exitCode == 259
 }

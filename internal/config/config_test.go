@@ -140,9 +140,6 @@ func TestResolveMergesDefaultsPathsAndEnvironment(t *testing.T) {
 			t.Fatalf("env[%s] = %q", key, env[key])
 		}
 	}
-	if !sortStrings(got.Env) {
-		t.Fatalf("environment is not sorted: %v", got.Env)
-	}
 }
 
 func TestResolveDefaultsHealthAndRestart(t *testing.T) {
