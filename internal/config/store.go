@@ -40,10 +40,16 @@ func Load(path string) (Config, error) {
 		}
 		return cfg, nil
 	}
+
 	if err != nil {
 		return Config{}, fmt.Errorf("open config: %w", err)
 	}
 	defer file.Close()
+
+	err = os.Chmod(path, 0o077)
+	if err != nil {
+		return Config{}, fmt.Errorf("secure config: %w", err)
+	}
 
 	decoder := json.NewDecoder(file)
 	decoder.DisallowUnknownFields()

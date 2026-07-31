@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -495,21 +495,15 @@ func mergeEnv(parent []string, file, explicit map[string]string) []string {
 			values[key] = value
 		}
 	}
-	for key, value := range file {
-		values[key] = value
+
+	maps.Copy(values, file)
+	maps.Copy(values, explicit)
+
+	result := make([]string, 0, len(values))
+	for key, value := range values {
+		result = append(result, key+"="+value)
 	}
-	for key, value := range explicit {
-		values[key] = value
-	}
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	result := make([]string, 0, len(keys))
-	for _, key := range keys {
-		result = append(result, key+"="+values[key])
-	}
+
 	return result
 }
 

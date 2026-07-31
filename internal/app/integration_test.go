@@ -39,7 +39,6 @@ func TestRunpWorkflowHelper(t *testing.T) {
 			os.Exit(1)
 		}
 	}
-	select {}
 }
 
 func TestRunpWorkflow(t *testing.T) {
