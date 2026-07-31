@@ -154,8 +154,8 @@ func TestDashboardFooterKeepsAllActionKeysVisible(t *testing.T) {
 		width int
 		want  []string
 	}{
-		{width: 60, want: []string{"Enter Log", "s k r g a e ? q"}},
-		{width: 120, want: []string{"Enter Log", "s Start", "k Stop", "r Restart", "g Project", "a Add", "e Edit", "? Help", "q Quit"}},
+		{width: 60, want: []string{"Enter Log", "s k r c g a e q"}},
+		{width: 120, want: []string{"Enter Log", "s Start", "k Stop", "r Restart", "c Clear log", "g Project", "a Add", "e Edit", "q Quit"}},
 	}
 	for _, test := range tests {
 		model := tui.New(tui.Services{Snapshots: dashboardFixture})
@@ -209,6 +209,28 @@ func TestKeyboardShortcutsModalOpensOverLogViewer(t *testing.T) {
 	model = updateModel(t, model, tea.KeyPressMsg{Code: '?'})
 	if !strings.Contains(stripANSI(model.View().Content), "LOG OUTPUT") {
 		t.Fatalf("log viewer not restored: %q", model.View().Content)
+	}
+}
+
+func TestDashboardClearsSelectedProcessLogAfterConfirmation(t *testing.T) {
+	var clearedProject, clearedProcess string
+	model := tui.New(tui.Services{
+		Snapshots: dashboardFixture,
+		ClearLog: func(project, process string) {
+			clearedProject, clearedProcess = project, process
+		},
+	})
+	pending, cmd := model.Update(tea.KeyPressMsg{Code: 'c'})
+	if cmd != nil || !strings.Contains(pending.(tui.Model).View().Content, "CONFIRM CLEAR LOG") {
+		t.Fatal("clear confirmation missing")
+	}
+	confirmed, cmd := pending.(tui.Model).Update(tea.KeyPressMsg{Code: 'y'})
+	if cmd == nil {
+		t.Fatal("clear command missing")
+	}
+	_, _ = confirmed.(tui.Model).Update(cmd())
+	if clearedProject != "shop" || clearedProcess != "api" {
+		t.Fatalf("cleared = %s/%s", clearedProject, clearedProcess)
 	}
 }
 

@@ -195,6 +195,20 @@ func (s *Store) Query(project, process string, filter Filter) []Record {
 	return result
 }
 
+func (s *Store) Clear(project, process string) {
+	key := processKey{project: project, process: process}
+	s.mu.RLock()
+	current := s.entries[key]
+	s.mu.RUnlock()
+	if current == nil {
+		return
+	}
+	current.mu.Lock()
+	current.ring = newRing(len(current.ring.records))
+	current.mu.Unlock()
+	s.queue(key, nil, nil)
+}
+
 func matches(record Record, filter Filter) bool {
 	if filter.Stream != "" && record.Stream != filter.Stream {
 		return false

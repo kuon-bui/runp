@@ -244,7 +244,7 @@ func (l logView) render() string {
 		)
 	}
 	footer := appFooterStyle.Width(l.width).MaxHeight(1).Render(
-		"[Esc] Back  [f] Follow  [t] Stream  [/] Search  [n/N] Match",
+		"[Esc] Back  [f] Follow  [t] Stream  [/] Search  [n/N] Match  [c] Clear log",
 	)
 	if l.search {
 		footer = appFooterStyle.Width(l.width).MaxHeight(1).Render(l.input.View())

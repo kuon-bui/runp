@@ -44,6 +44,25 @@ func TestQueryFiltersCaseInsensitivelyByStream(t *testing.T) {
 	}
 }
 
+func TestClearRemovesBufferedRecordsAndKeepsWriterOpen(t *testing.T) {
+	store := logstore.New(t.TempDir(), time.Millisecond)
+	t.Cleanup(func() { _ = store.Close() })
+	h, err := store.Open("shop", "api", config.LogConfig{MaxSizeMB: 1, MaxFiles: 2, BufferLines: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.WriteString(h.Stdout(), "before\n")
+	store.Clear("shop", "api")
+	if got := store.Snapshot("shop", "api"); len(got) != 0 {
+		t.Fatalf("records after clear = %#v", got)
+	}
+	_, _ = io.WriteString(h.Stdout(), "after\n")
+	got := store.Snapshot("shop", "api")
+	if len(got) != 1 || got[0].Text != "after" {
+		t.Fatalf("records after write = %#v", got)
+	}
+}
+
 func TestWriterChunksLargeLinesWithoutDataLoss(t *testing.T) {
 	store := logstore.New(t.TempDir(), time.Millisecond)
 	t.Cleanup(func() { _ = store.Close() })

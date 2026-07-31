@@ -76,6 +76,29 @@ func TestLogFollow(t *testing.T) {
 	}
 }
 
+func TestLogViewerClearsCurrentProcessLogAfterConfirmation(t *testing.T) {
+	var clearedProject, clearedProcess string
+	model := tui.New(tui.Services{
+		Snapshots: dashboardFixture,
+		ClearLog: func(project, process string) {
+			clearedProject, clearedProcess = project, process
+		},
+	})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
+	pending, cmd := model.Update(tea.KeyPressMsg{Code: 'c'})
+	if cmd != nil || !strings.Contains(pending.(tui.Model).View().Content, "CONFIRM CLEAR LOG") {
+		t.Fatal("clear confirmation missing in log viewer")
+	}
+	confirmed, cmd := pending.(tui.Model).Update(tea.KeyPressMsg{Code: 'y'})
+	if cmd == nil {
+		t.Fatal("clear command missing")
+	}
+	finished, _ := confirmed.(tui.Model).Update(cmd())
+	if clearedProject != "shop" || clearedProcess != "api" || !strings.Contains(finished.(tui.Model).View().Content, "LOG OUTPUT") {
+		t.Fatalf("cleared/view = %s/%s/%q", clearedProject, clearedProcess, finished.(tui.Model).View().Content)
+	}
+}
+
 func TestLogViewerUsesTerminalNativeChromeAndWholeTerminal(t *testing.T) {
 	model := logModelWithRecords([]logstore.Record{{
 		At: time.Unix(1, 0), Stream: logstore.Stdout, Text: "ready",

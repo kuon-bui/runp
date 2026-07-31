@@ -20,6 +20,7 @@ type Services struct {
 	LogEvents      <-chan logstore.Event
 	LogSnapshot    func(string, string) []logstore.Record
 	LogQuery       func(string, string, logstore.Filter) []logstore.Record
+	ClearLog       func(string, string)
 	StartProcess   func(context.Context, string, string) error
 	StopProcess    func(context.Context, string, string) error
 	RestartProcess func(context.Context, string, string) error
@@ -42,6 +43,7 @@ const (
 	startProject
 	stopProject
 	restartProject
+	clearLog
 	saveConfig
 	saveCritical
 )
@@ -57,6 +59,7 @@ type Model struct {
 	projectMenu   bool
 	addMenu       bool
 	shortcuts     bool
+	addMenuIndex  int
 	busy          bool
 	err           error
 	log           *logView
@@ -185,6 +188,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.log != nil {
+			if msg.Code == 'c' && !m.log.search {
+				m.pending = clearLog
+				return m, nil
+			}
+			if msg.Code == tea.KeyEscape && !m.log.search {
+				m.log = nil
+				return m, nil
+			}
+			return m, m.log.update(msg, m.services)
+		}
 		if m.busy {
 			return m, nil
 		}
@@ -233,7 +247,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.addMenu {
-			switch msg.Code {
+			code := msg.Code
+			switch code {
+			case tea.KeyUp:
+				m.addMenuIndex = max(m.addMenuIndex-1, 0)
+				return m, nil
+			case tea.KeyDown:
+				m.addMenuIndex = min(m.addMenuIndex+1, 2)
+				return m, nil
+			case tea.KeyEnter:
+				code = []rune{'p', 'o', tea.KeyEscape}[m.addMenuIndex]
+			}
+			switch code {
 			case 'p':
 				m.addMenu = false
 				if err := m.openProjectForm(-1); err != nil {
@@ -277,10 +302,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pending = stopProcess
 		case 'r':
 			m.pending = restartProcess
+		case 'c':
+			m.pending = clearLog
 		case 'g':
 			m.projectMenu = true
 		case 'a':
 			m.addMenu = true
+			m.addMenuIndex = 0
 		case 'e':
 			if err := m.openProcessForm(m.processIndex); err != nil {
 				m.err = err
@@ -330,7 +358,7 @@ func (m Model) View() tea.View {
 		content = composeOverlay(content, renderProjectMenu(), m.width, m.height)
 	}
 	if m.addMenu {
-		content = composeOverlay(content, renderAddMenu(), m.width, m.height)
+		content = composeOverlay(content, renderAddMenu(m.addMenuIndex), m.width, m.height)
 	}
 	if m.pending != noAction {
 		content = composeOverlay(content, renderConfirmation(m.pending), m.width, m.height)
@@ -451,6 +479,14 @@ func (m Model) actionCommand(pending action) tea.Cmd {
 			return func() tea.Msg { return operationDoneMsg{action: pending, err: errors.New("no project selected")} }
 		}
 		return operationCommand(pending, func(ctx context.Context) error { return m.services.RestartProject(ctx, selectedProject) })
+	case clearLog:
+		if !selected || m.services.ClearLog == nil {
+			return func() tea.Msg { return operationDoneMsg{action: pending, err: errors.New("no process selected")} }
+		}
+		return operationCommand(pending, func(context.Context) error {
+			m.services.ClearLog(project, name)
+			return nil
+		})
 	case saveConfig:
 		if m.services.SaveConfig == nil {
 			return func() tea.Msg { return operationDoneMsg{action: pending, err: errors.New("config save unavailable")} }
