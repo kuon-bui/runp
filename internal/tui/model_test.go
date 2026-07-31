@@ -154,8 +154,8 @@ func TestDashboardFooterKeepsAllActionKeysVisible(t *testing.T) {
 		width int
 		want  []string
 	}{
-		{width: 60, want: []string{"Enter Log", "s k r g a e q"}},
-		{width: 120, want: []string{"Enter Log", "s Start", "k Stop", "r Restart", "g Project", "a Add", "e Edit", "q Quit"}},
+		{width: 60, want: []string{"Enter Log", "s k r g a e ? q"}},
+		{width: 120, want: []string{"Enter Log", "s Start", "k Stop", "r Restart", "g Project", "a Add", "e Edit", "? Help", "q Quit"}},
 	}
 	for _, test := range tests {
 		model := tui.New(tui.Services{Snapshots: dashboardFixture})
@@ -167,6 +167,48 @@ func TestDashboardFooterKeepsAllActionKeysVisible(t *testing.T) {
 				t.Fatalf("width %d footer missing %q: %q", test.width, want, footer)
 			}
 		}
+	}
+}
+
+func TestKeyboardShortcutsModalShowsAllContextsAndBlocksInput(t *testing.T) {
+	model := tui.New(tui.Services{Snapshots: dashboardFixture})
+	model = updateModel(t, model, tea.WindowSizeMsg{Width: 100, Height: 24})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: '?'})
+	plain := stripANSI(model.View().Content)
+	for _, want := range []string{
+		"KEYBOARD SHORTCUTS", "DASHBOARD", "LOGS & SEARCH", "FORM", "MENUS & CONFIRM",
+		"[Enter] Open logs", "[Ctrl+S/Esc] Save / Cancel", "[Ctrl+X] Delete environment",
+		"[p] Add project", "[o] Add process", "[y/n/Esc] Confirm / Cancel",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("shortcuts missing %q: %q", want, plain)
+		}
+	}
+	if width, height := lipgloss.Size(model.View().Content); width != 100 || height != 24 {
+		t.Fatalf("screen = %dx%d", width, height)
+	}
+	for _, border := range []string{"┌", "┐", "└", "┘"} {
+		if strings.Count(plain, border) < 5 {
+			t.Fatalf("section frames missing %q: %q", border, plain)
+		}
+	}
+	model = updateModel(t, model, tea.KeyPressMsg{Code: tea.KeyRight})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if !strings.Contains(model.View().Content, "› api") {
+		t.Fatalf("dashboard moved behind shortcuts: %q", model.View().Content)
+	}
+}
+
+func TestKeyboardShortcutsModalOpensOverLogViewer(t *testing.T) {
+	model := tui.New(tui.Services{Snapshots: dashboardFixture})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: '?'})
+	if !strings.Contains(stripANSI(model.View().Content), "KEYBOARD SHORTCUTS") {
+		t.Fatalf("shortcuts missing over logs: %q", model.View().Content)
+	}
+	model = updateModel(t, model, tea.KeyPressMsg{Code: '?'})
+	if !strings.Contains(stripANSI(model.View().Content), "LOG OUTPUT") {
+		t.Fatalf("log viewer not restored: %q", model.View().Content)
 	}
 }
 

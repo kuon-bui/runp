@@ -56,6 +56,7 @@ type Model struct {
 	pending       action
 	projectMenu   bool
 	addMenu       bool
+	shortcuts     bool
 	busy          bool
 	err           error
 	log           *logView
@@ -153,6 +154,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		if msg.Code == 'c' && msg.Mod == tea.ModCtrl {
 			return m.requestShutdown()
+		}
+		if m.shortcuts {
+			if msg.Code == '?' || msg.Code == tea.KeyEscape {
+				m.shortcuts = false
+			}
+			return m, nil
+		}
+		if msg.Code == '?' && m.form == nil && m.pending == noAction && !m.busy &&
+			!m.projectMenu && !m.addMenu && (m.log == nil || !m.log.search) {
+			m.shortcuts = true
+			return m, nil
 		}
 		if m.log != nil {
 			if msg.Code == tea.KeyEscape && !m.log.search {
@@ -297,6 +309,7 @@ func (m Model) requestShutdown() (tea.Model, tea.Cmd) {
 	m.form = nil
 	m.projectMenu = false
 	m.addMenu = false
+	m.shortcuts = false
 	if m.hasActiveProcesses() {
 		m.pending = shutdown
 		return m, nil
@@ -327,6 +340,9 @@ func (m Model) View() tea.View {
 	}
 	if m.err != nil && m.form == nil {
 		content = composeOverlay(content, renderOperationError(m.err), m.width, m.height)
+	}
+	if m.shortcuts {
+		content = composeOverlay(content, renderShortcuts(), m.width, m.height)
 	}
 	view := tea.NewView(fitScreen(content, m.width, m.height))
 	view.AltScreen = true
