@@ -28,7 +28,7 @@ func TestControllerHelper(t *testing.T) {
 	}
 	switch mode {
 	case "wait":
-		select {}
+		time.Sleep(24 * time.Hour)
 	case "crash-once":
 		marker := os.Getenv("RUNP_CRASH_MARKER")
 		if _, err := os.Stat(marker); os.IsNotExist(err) {
@@ -38,7 +38,7 @@ func TestControllerHelper(t *testing.T) {
 			}
 			os.Exit(1)
 		}
-		select {}
+		time.Sleep(24 * time.Hour)
 	}
 }
 

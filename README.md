@@ -16,6 +16,8 @@ Run with default config:
 runp
 ```
 
+When no `--config` is given, `runp` uses `.runp.json` from current working directory if present, then falls back to user config.
+
 Use another config:
 
 ```sh
@@ -24,6 +26,7 @@ runp --config /path/to/config.json
 
 Default paths:
 
+- Local config: `<current working directory>/.runp.json`
 - Config: `<os.UserConfigDir()>/runp/config.json`
 - Logs: `<os.UserCacheDir()>/runp/logs/<project>/<process>.log`
 

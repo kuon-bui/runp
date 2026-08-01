@@ -21,11 +21,11 @@ func TestProcessHelper(t *testing.T) {
 	}
 	switch mode {
 	case "wait":
-		select {}
+		time.Sleep(24 * time.Hour)
 	case "stdout-stderr":
 		_, _ = os.Stdout.WriteString("stdout line\n")
 		_, _ = os.Stderr.WriteString("stderr line\n")
-		select {}
+		time.Sleep(24 * time.Hour)
 	case "exit-1":
 		os.Exit(1)
 	case "exit-0":
@@ -35,7 +35,7 @@ func TestProcessHelper(t *testing.T) {
 		os.Exit(1)
 	case "ignore-term":
 		signal.Ignore()
-		select {}
+		time.Sleep(24 * time.Hour)
 	}
 }
 

@@ -47,9 +47,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return fmt.Errorf("unexpected positional arguments: %v", flags.Args())
 	}
 	if *configPath == "" {
-		path, err := config.DefaultPath()
+		path, err := config.CurrentPath()
 		if err != nil {
-			return fmt.Errorf("default config path: %w", err)
+			return fmt.Errorf("config path: %w", err)
 		}
 		*configPath = path
 	}

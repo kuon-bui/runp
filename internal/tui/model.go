@@ -158,6 +158,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Code == 'c' && msg.Mod == tea.ModCtrl {
 			return m.requestShutdown()
 		}
+		if m.err != nil {
+			if msg.Code == tea.KeyEnter || msg.Code == tea.KeyEscape {
+				m.err = nil
+				if m.form != nil {
+					m.form.err = nil
+				}
+			}
+			return m, nil
+		}
 		if m.shortcuts {
 			if msg.Code == '?' || msg.Code == tea.KeyEscape {
 				m.shortcuts = false
@@ -168,13 +177,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			!m.projectMenu && !m.addMenu && (m.log == nil || !m.log.search) {
 			m.shortcuts = true
 			return m, nil
-		}
-		if m.log != nil {
-			if msg.Code == tea.KeyEscape && !m.log.search {
-				m.log = nil
-				return m, nil
-			}
-			return m, m.log.update(msg, m.services)
 		}
 		if m.pending != noAction {
 			if msg.Code == 'y' {
@@ -361,12 +363,14 @@ func (m Model) View() tea.View {
 		content = composeOverlay(content, renderAddMenu(m.addMenuIndex), m.width, m.height)
 	}
 	if m.pending != noAction {
-		content = composeOverlay(content, renderConfirmation(m.pending), m.width, m.height)
+		x, y, width, height := m.logPaneBounds()
+		content = composeOverlayIn(content, renderConfirmation(m.pending), m.width, m.height, x, y, width, height)
 	}
 	if m.busy {
-		content = composeOverlay(content, renderBusy(), m.width, m.height)
+		x, y, width, height := m.logPaneBounds()
+		content = composeOverlayIn(content, renderBusy(), m.width, m.height, x, y, width, height)
 	}
-	if m.err != nil && m.form == nil {
+	if m.err != nil {
 		content = composeOverlay(content, renderOperationError(m.err), m.width, m.height)
 	}
 	if m.shortcuts {
@@ -375,6 +379,23 @@ func (m Model) View() tea.View {
 	view := tea.NewView(fitScreen(content, m.width, m.height))
 	view.AltScreen = true
 	return view
+}
+
+func (m Model) logPaneBounds() (x, y, width, height int) {
+	if m.log != nil {
+		return 0, 0, m.width, m.height
+	}
+	geometry := dashboardLayout(m.width, m.height)
+	x, y = 0, 1
+	switch geometry.mode {
+	case dashboardWide:
+		x = geometry.projectWidth + geometry.processWidth
+	case dashboardMedium:
+		x = geometry.processWidth
+	case dashboardNarrow:
+		y += geometry.processHeight
+	}
+	return x, y, geometry.logWidth, geometry.logHeight
 }
 
 func (m *Model) resizePreview() {

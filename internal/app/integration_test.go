@@ -39,6 +39,7 @@ func TestRunpWorkflowHelper(t *testing.T) {
 			os.Exit(1)
 		}
 	}
+	time.Sleep(24 * time.Hour)
 }
 
 func TestRunpWorkflow(t *testing.T) {

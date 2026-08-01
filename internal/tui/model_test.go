@@ -118,10 +118,31 @@ func TestDashboardUsesWholeTerminalAndShowsPID(t *testing.T) {
 func TestDashboardUsesTerminalNativePalette(t *testing.T) {
 	model := tui.New(tui.Services{Snapshots: dashboardFixture})
 	model = updateModel(t, model, tea.WindowSizeMsg{Width: 120, Height: 30})
+	model = updateModel(t, model, tea.KeyPressMsg{Code: tea.KeyRight})
 	view := model.View().Content
 	assertTerminalNativePalette(t, view)
-	if !hasANSICode(view, ansiSuccess) || !strings.Contains(stripANSI(view), "› api") {
+	if !hasANSICode(view, ansiSuccess) || !hasANSICode(view, "24") || !strings.Contains(stripANSI(view), "› web") {
 		t.Fatalf("semantic state or selection marker missing: %q", view)
+	}
+}
+
+func TestDashboardHighlightsSelectedProcess(t *testing.T) {
+	model := tui.New(tui.Services{Snapshots: dashboardFixture})
+	model = updateModel(t, model, tea.WindowSizeMsg{Width: 60, Height: 20})
+	if view := model.View().Content; !hasANSICode(view, "24") || !strings.Contains(stripANSI(view), "› api") {
+		t.Fatalf("selected process not highlighted: %q", view)
+	}
+}
+
+func TestDashboardNamesSelectedLogPreview(t *testing.T) {
+	model := tui.New(tui.Services{Snapshots: dashboardFixture})
+	model = updateModel(t, model, tea.WindowSizeMsg{Width: 100, Height: 24})
+	if plain := stripANSI(model.View().Content); !strings.Contains(plain, "LIVE LOG · SHOP / API") {
+		t.Fatalf("log preview context missing: %q", plain)
+	}
+	model = updateModel(t, model, tea.KeyPressMsg{Code: tea.KeyRight})
+	if plain := stripANSI(model.View().Content); !strings.Contains(plain, "LIVE LOG · SHOP / WEB") {
+		t.Fatalf("updated log preview context missing: %q", plain)
 	}
 }
 
@@ -384,11 +405,23 @@ func TestOverlayBlocksDashboardNavigation(t *testing.T) {
 
 func TestConfirmationUsesHighestVisualLayer(t *testing.T) {
 	model := tui.New(tui.Services{Snapshots: dashboardFixture})
+	model = updateModel(t, model, tea.WindowSizeMsg{Width: 120, Height: 24})
 	model = updateModel(t, model, tea.KeyPressMsg{Code: 'r'})
 	plain := stripANSI(model.View().Content)
 	if !strings.Contains(plain, "CONFIRM RESTART") || !strings.Contains(plain, "[y] Yes") {
 		t.Fatalf("confirmation = %q", plain)
 	}
+	for line := range strings.SplitSeq(plain, "\n") {
+		if before, _, ok := strings.Cut(line, "CONFIRM RESTART"); ok {
+			logCenter := (24 + 46 + 120) / 2
+			titleCenter := len([]rune(before)) + len([]rune("CONFIRM RESTART"))/2
+			if titleCenter < logCenter-3 || titleCenter > logCenter+3 {
+				t.Fatalf("confirmation center = %d, want %d: %q", titleCenter, logCenter, line)
+			}
+			return
+		}
+	}
+	t.Fatal("confirmation title missing")
 }
 
 func TestProjectEditRoute(t *testing.T) {
@@ -465,6 +498,38 @@ func TestBusySaveBlocksFormInput(t *testing.T) {
 	if !strings.Contains(view, "WORKING") || !strings.Contains(view, "Edit process · api") {
 		t.Fatalf("busy layer accepted form input: %q", blocked.(tui.Model).View().Content)
 	}
+}
+
+func TestStartWorkingModalCentersInLogPane(t *testing.T) {
+	model := tui.New(tui.Services{
+		Snapshots:    dashboardFixture,
+		StartProcess: func(context.Context, string, string) error { return nil },
+	})
+	model = updateModel(t, model, tea.WindowSizeMsg{Width: 120, Height: 24})
+	started, cmd := model.Update(tea.KeyPressMsg{Code: 's'})
+	if cmd == nil {
+		t.Fatal("start command missing")
+	}
+	for _, line := range strings.Split(stripANSI(started.(tui.Model).View().Content), "\n") {
+		if bytePosition := strings.Index(line, "WORKING"); bytePosition >= 0 {
+			logCenter := (24 + 46 + 120) / 2
+			runes := []rune(line)
+			titleStart := len([]rune(line[:bytePosition]))
+			left, right := titleStart-1, titleStart
+			for left >= 0 && runes[left] != '│' {
+				left--
+			}
+			for right < len(runes) && runes[right] != '│' {
+				right++
+			}
+			modalCenter := (left + right) / 2
+			if modalCenter < logCenter-2 || modalCenter > logCenter+2 {
+				t.Fatalf("working modal center = %d, want %d: %q", modalCenter, logCenter, line)
+			}
+			return
+		}
+	}
+	t.Fatal("working modal missing")
 }
 
 func TestMatchingLogEventRefreshesPreviewBehindForm(t *testing.T) {

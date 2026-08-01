@@ -3,12 +3,13 @@ package tui
 import lipgloss "charm.land/lipgloss/v2"
 
 const (
-	colorAccent  = "14"
-	colorMuted   = "8"
-	colorSuccess = "10"
-	colorError   = "9"
-	colorWarning = "11"
-	colorSurface = "236"
+	colorAccent    = "14"
+	colorMuted     = "8"
+	colorSuccess   = "10"
+	colorError     = "9"
+	colorWarning   = "11"
+	colorSurface   = "236"
+	colorSelection = "24"
 
 	defaultTerminalWidth  = 80
 	defaultTerminalHeight = 24
@@ -39,6 +40,8 @@ var (
 	paneTitleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorMuted))
 	selectionStyle = lipgloss.NewStyle().Bold(true).
 			Foreground(lipgloss.Color(colorAccent))
+	selectedRowStyle = lipgloss.NewStyle().Bold(true).
+				Foreground(lipgloss.Color("15")).Background(lipgloss.Color(colorSelection))
 	runningStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorSuccess))
 	transitionalStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorWarning))
 	stoppedStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMuted))
@@ -48,11 +51,11 @@ var (
 				BorderStyle(lipgloss.NormalBorder()).
 				BorderForeground(lipgloss.Color(colorMuted)).
 				Padding(1, 2)
-	overlayTitleStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorAccent))
-	shortcutSectionStyle  = lipgloss.NewStyle().Width(44).
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderForeground(lipgloss.Color(colorMuted)).
-			Padding(0, 1)
+	overlayTitleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorAccent))
+	shortcutSectionStyle = lipgloss.NewStyle().Width(44).
+				BorderStyle(lipgloss.NormalBorder()).
+				BorderForeground(lipgloss.Color(colorMuted)).
+				Padding(0, 1)
 	confirmTitleStyle      = overlayTitleStyle.Foreground(lipgloss.Color(colorWarning))
 	formHeaderStyle        = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorAccent))
 	formMutedStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMuted))
@@ -65,6 +68,7 @@ var (
 	formFocusedInputStyle = lipgloss.NewStyle().
 				Border(lipgloss.ThickBorder(), false, false, true, false).
 				BorderForeground(lipgloss.Color(colorAccent)).Padding(0, 1)
+	argumentTagStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color(colorSelection)).Padding(0, 1)
 	formInlineErrorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color(colorError))
 	formSwitchStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMuted))
 	formEnabledSwitchStyle = formSwitchStyle.Foreground(lipgloss.Color(colorSuccess)).Bold(true)

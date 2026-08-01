@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -503,6 +504,7 @@ func mergeEnv(parent []string, file, explicit map[string]string) []string {
 	for key, value := range values {
 		result = append(result, key+"="+value)
 	}
+	sort.Strings(result)
 
 	return result
 }

@@ -179,7 +179,7 @@ func TestProcessFormBuildsAllFields(t *testing.T) {
 	values := map[string]string{
 		"Name":               "api",
 		"Command":            "server",
-		"Args":               `["--port","8080"]`,
+		"Args":               "8080",
 		"Directory":          ".",
 		"EnvFile":            ".env",
 		"DependsOn":          "db, db , worker",
@@ -201,6 +201,7 @@ func TestProcessFormBuildsAllFields(t *testing.T) {
 	for label, value := range values {
 		form.set(label, value)
 	}
+	form.argumentTags = []string{"--port"}
 	for key, value := range map[string]string{"TOKEN": "secret-value", "PORT": "8080"} {
 		form.set("EnvKey", key)
 		form.set("EnvValue", value)
@@ -509,34 +510,32 @@ func TestUpDownNavigateWhileEnumArrowsCycle(t *testing.T) {
 	}
 }
 
-func TestFormAttachesParseErrorToField(t *testing.T) {
+func TestProcessFormArgumentsUseTags(t *testing.T) {
 	cfg := config.Default()
 	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
 	form, _ := newProcessForm(cfg, 0, -1)
-	form.set(fieldArgs, "not-json")
-	_, err := form.config()
-	if err == nil || form.fieldErrors[fieldArgs] == nil {
-		t.Fatalf("error/fields = %v/%#v", err, form.fieldErrors)
+	form.focusControl(fieldArgs)
+	form.set(fieldArgs, "--config")
+	form.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	form.set(fieldArgs, "path with spaces.json")
+	form.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := form.value(fieldArgs); got != "" {
+		t.Fatalf("pending argument = %q", got)
 	}
 	field := form.fields[form.fieldIndex(fieldArgs)]
-	if rendered := form.renderField(field, 60); !strings.Contains(rendered, "args:") {
-		t.Fatalf("field error hidden: %q", rendered)
+	if rendered := form.renderField(field, 60); !strings.Contains(rendered, "--config") || !strings.Contains(rendered, "path with spaces.json") || strings.Contains(rendered, `"`) {
+		t.Fatalf("argument tags = %q", rendered)
 	}
-}
-
-func TestFormRevealsFieldWithParseError(t *testing.T) {
-	cfg := config.Default()
-	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
-	form, _ := newProcessForm(cfg, 0, -1)
-	form.set(fieldArgs, "not-json")
-	for form.focusLabel() != fieldHealthType {
-		form.moveFocus(1)
+	got, err := form.configWithoutValidation()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := form.config(); err == nil {
-		t.Fatal("missing parse error")
+	if !reflect.DeepEqual(got.Projects[0].Processes[0].Args, []string{"--config", "path with spaces.json"}) {
+		t.Fatalf("args = %#v", got.Projects[0].Processes[0].Args)
 	}
-	if form.focusLabel() != fieldArgs || !strings.Contains(form.view(), "args:") {
-		t.Fatalf("parse error hidden on %q: %q", form.focusLabel(), form.view())
+	form.update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if !reflect.DeepEqual(form.argumentTags, []string{"--config"}) {
+		t.Fatalf("args after delete = %#v", form.argumentTags)
 	}
 }
 
@@ -545,11 +544,37 @@ func TestFormKeepsCrossFieldErrorInSummary(t *testing.T) {
 	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
 	form, _ := newProcessForm(cfg, 0, -1)
 	form.set("Command", "echo hi")
-	form.set(fieldArgs, `["bad"]`)
+	form.argumentTags = []string{"bad"}
 	form.toggle(toggleShell)
 	_, err := form.config()
 	if err == nil || form.err == nil || len(form.fieldErrors) != 0 {
 		t.Fatalf("error/summary/fields = %v/%v/%#v", err, form.err, form.fieldErrors)
+	}
+}
+
+func TestFormValidationErrorUsesBlockingModal(t *testing.T) {
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: t.TempDir()}}
+	model := New(Services{
+		Snapshots: func() controller.Snapshot {
+			return controller.Snapshot{Projects: []controller.ProjectSnapshot{{Name: "shop"}}}
+		},
+		Config: func() config.Config { return cfg },
+	})
+	opened, _ := model.Update(tea.KeyPressMsg{Code: 'a'})
+	opened, _ = opened.(Model).Update(tea.KeyPressMsg{Code: 'o'})
+	editing := opened.(Model)
+	editing.form.set(fieldName, "api")
+	editing.form.set("Command", "server")
+	editing.form.set(fieldDirectory, "missing")
+	failed, _ := editing.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	plain := formANSIPattern.ReplaceAllString(failed.(Model).View().Content, "")
+	if !strings.Contains(plain, "ERROR") || !strings.Contains(plain, "[Enter/Esc] Close") {
+		t.Fatalf("error modal missing: %q", plain)
+	}
+	dismissed, _ := failed.(Model).Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if dismissed.(Model).form == nil || dismissed.(Model).err != nil {
+		t.Fatal("dismiss closed form or kept error")
 	}
 }
 
@@ -571,7 +596,7 @@ func TestProcessFormRejectsShellArgs(t *testing.T) {
 	form, _ := newProcessForm(cfg, 0, -1)
 	form.set("Name", "api")
 	form.set("Command", "echo hi")
-	form.set("Args", `["not-allowed"]`)
+	form.argumentTags = []string{"not-allowed"}
 	form.toggle("Shell")
 	if _, err := form.configWithoutValidation(); err == nil || !strings.Contains(err.Error(), "args must be empty") {
 		t.Fatalf("error = %v", err)

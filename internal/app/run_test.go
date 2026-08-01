@@ -76,6 +76,32 @@ func TestRunUsesDefaultConfigPath(t *testing.T) {
 	}
 }
 
+func TestRunUsesConfigFromWorkingDirectory(t *testing.T) {
+	stubProgram(t)
+	configRoot, _ := setUserDirs(t)
+	directory := t.TempDir()
+	previousDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(directory); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previousDirectory) })
+
+	path := filepath.Join(directory, ".runp.json")
+	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err = Run(context.Background(), nil, strings.NewReader(""), io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "load config") {
+		t.Fatalf("error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(configRoot, "runp", "config.json")); !os.IsNotExist(err) {
+		t.Fatalf("user config created despite local config: %v", err)
+	}
+}
+
 func TestRunStoresLogsBelowCacheLogsDirectory(t *testing.T) {
 	root := t.TempDir()
 	_, cacheRoot := setUserDirsAt(t, root)
