@@ -13,7 +13,22 @@ import (
 const (
 	configDirectoryMode = 0o700
 	configFileMode      = 0o600
+	localConfigName     = ".runp.json"
 )
+
+func CurrentPath() (string, error) {
+	directory, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolve working directory: %w", err)
+	}
+	path := filepath.Join(directory, localConfigName)
+	if _, err := os.Stat(path); err == nil {
+		return path, nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("inspect local config: %w", err)
+	}
+	return DefaultPath()
+}
 
 func DefaultPath() (string, error) {
 	root, err := os.UserConfigDir()
@@ -46,7 +61,7 @@ func Load(path string) (Config, error) {
 	}
 	defer file.Close()
 
-	err = os.Chmod(path, 0o077)
+	err = os.Chmod(path, configFileMode)
 	if err != nil {
 		return Config{}, fmt.Errorf("secure config: %w", err)
 	}

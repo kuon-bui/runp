@@ -91,6 +91,7 @@ type editForm struct {
 	booleans     map[string]bool
 	focus        int
 	workingEnv   map[string]string
+	argumentTags []string
 	err          error
 	fieldErrors  map[string]error
 	body         viewport.Model
@@ -231,19 +232,16 @@ func newProcessForm(cfg config.Config, projectIndex, processIndex int) (*editFor
 		processIndex: processIndex,
 		booleans:     map[string]bool{toggleShell: item.Shell, toggleAutostart: item.Autostart},
 		workingEnv:   cloneMap(item.Env),
+		argumentTags: append([]string(nil), item.Args...),
 		fieldErrors:  make(map[string]error),
 		body:         newFormBody(),
 		width:        defaultTerminalWidth,
 		height:       defaultTerminalHeight,
 		creating:     creating,
 	}
-	args := []byte("[]")
-	if item.Args != nil {
-		args, _ = json.Marshal(item.Args)
-	}
 	form.addField(basicSection, fieldName, fieldName, item.Name)
 	form.addField(basicSection, "Command", "Command", item.Command)
-	form.addField(basicSection, fieldArgs, "Arguments", string(args))
+	form.addField(basicSection, fieldArgs, "Arguments", "")
 	form.addField(basicSection, fieldDirectory, fieldDirectory, item.Directory)
 	form.addField(basicSection, "DependsOn", "Depends on", strings.Join(item.DependsOn, ", "))
 	form.addField(basicSection, "StopTimeout", "Stop timeout", durationString(item.StopTimeout))
@@ -337,6 +335,18 @@ func (f *editForm) toggle(label string) {
 func (f *editForm) update(msg tea.Msg) tea.Cmd {
 	key, isKey := msg.(tea.KeyPressMsg)
 	if isKey {
+		if f.kind == processForm && f.focusLabel() == fieldArgs {
+			switch key.Code {
+			case tea.KeyEnter:
+				f.addArgumentTag()
+				return nil
+			case tea.KeyBackspace:
+				if f.value(fieldArgs) == "" && len(f.argumentTags) > 0 {
+					f.argumentTags = f.argumentTags[:len(f.argumentTags)-1]
+					return nil
+				}
+			}
+		}
 		if f.kind == processForm && f.focusLabel() == fieldEnvValue && key.Code == tea.KeyEnter {
 			f.setEnvValue()
 			return nil
@@ -387,6 +397,13 @@ func (f *editForm) update(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	f.fields[index].input, cmd = f.fields[index].input.Update(msg)
 	return cmd
+}
+
+func (f *editForm) addArgumentTag() {
+	if value := f.value(fieldArgs); value != "" {
+		f.argumentTags = append(f.argumentTags, value)
+		f.set(fieldArgs, "")
+	}
 }
 
 func isEnumField(label string) bool {
@@ -627,6 +644,15 @@ func (f *editForm) renderField(field formField, width int) string {
 	if focused {
 		style = formFocusedInputStyle
 	}
+	if field.label == fieldArgs {
+		tags := make([]string, len(f.argumentTags))
+		for index, argument := range f.argumentTags {
+			tags[index] = argumentTagStyle.Render(argument)
+		}
+		if len(tags) > 0 {
+			value = strings.Join(tags, " ") + "  " + value
+		}
+	}
 	result := label + "\n" + style.Width(max(width-4, 1)).Render(value)
 	if err := f.fieldErrors[field.label]; err != nil {
 		result += "\n" + formInlineErrorStyle.Render(err.Error())
@@ -660,6 +686,9 @@ func (f *editForm) renderToggle(toggle formToggle) string {
 
 func (f *editForm) footer() string {
 	footer := "Ctrl+S save  Esc cancel  Tab next"
+	if f.kind == processForm && f.focusLabel() == fieldArgs {
+		footer += "  Enter add argument  Backspace remove"
+	}
 	if f.kind == processForm && f.activeSection() == environmentSection {
 		footer += "  Enter set env  Ctrl+X delete env"
 	}
@@ -723,12 +752,11 @@ func (f *editForm) configWithoutValidation() (config.Config, error) {
 	item.Directory = strings.TrimSpace(f.value(fieldDirectory))
 	item.EnvFile = strings.TrimSpace(f.value("EnvFile"))
 	item.Autostart = f.booleans[toggleAutostart]
-	if err := parseJSONField("args", f.value(fieldArgs), &item.Args); err != nil {
-		return config.Config{}, fieldFailure(fieldArgs, err)
+	item.Args = append([]string(nil), f.argumentTags...)
+	if pending := f.value(fieldArgs); pending != "" {
+		item.Args = append(item.Args, pending)
 	}
-	if item.Args == nil {
-		item.Args = nil
-	} else if len(item.Args) == 0 && f.value(fieldArgs) == "[]" && f.base.Projects[f.projectIndex].Processes[f.processIndex].Args == nil {
+	if len(item.Args) == 0 && f.base.Projects[f.projectIndex].Processes[f.processIndex].Args == nil {
 		item.Args = nil
 	}
 	if item.Shell && len(item.Args) > 0 {
@@ -774,16 +802,6 @@ func (f *editForm) configWithoutValidation() (config.Config, error) {
 		return config.Config{}, fieldFailure("StopTimeout", err)
 	}
 	return result, nil
-}
-
-func parseJSONField(label, value string, destination any) error {
-	if strings.TrimSpace(value) == "" {
-		value = "null"
-	}
-	if err := json.Unmarshal([]byte(value), destination); err != nil {
-		return fmt.Errorf("%s: %w", label, err)
-	}
-	return nil
 }
 
 func parseDurationField(label, value string) (config.Duration, error) {

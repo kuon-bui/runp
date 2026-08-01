@@ -101,10 +101,7 @@ func processColumns(width int) string {
 }
 
 func renderState(state process.State) string {
-	label := strings.ToUpper(string(state))
-	if label == "" {
-		label = "STOPPED"
-	}
+	label := stateLabel(state)
 	switch state {
 	case process.Running:
 		return runningStyle.Render(label)
@@ -117,6 +114,13 @@ func renderState(state process.State) string {
 	}
 }
 
+func stateLabel(state process.State) string {
+	if label := strings.ToUpper(string(state)); label != "" {
+		return label
+	}
+	return "STOPPED"
+}
+
 func projectRows(snapshot controller.Snapshot, selected int) []string {
 	rows := make([]string, 0, len(snapshot.Projects))
 	for index, project := range snapshot.Projects {
@@ -126,7 +130,7 @@ func projectRows(snapshot controller.Snapshot, selected int) []string {
 		}
 		row := marker + project.Name
 		if index == selected {
-			row = selectionStyle.Render(row)
+			row = selectedRowStyle.Render(row)
 		}
 		rows = append(rows, row)
 	}
@@ -140,10 +144,14 @@ func processRow(item controller.ProcessSnapshot, selected bool, width int) strin
 		marker = "› "
 	}
 	name := lipgloss.NewStyle().Inline(true).MaxWidth(nameWidth).Render(item.Name)
-	state := lipgloss.NewStyle().Width(10).MaxWidth(10).Render(renderState(item.Runtime.State))
+	stateValue := renderState(item.Runtime.State)
+	if selected {
+		stateValue = stateLabel(item.Runtime.State)
+	}
+	state := lipgloss.NewStyle().Width(10).MaxWidth(10).Render(stateValue)
 	row := fmt.Sprintf("%s%-*s %s %5s", marker, nameWidth, name, state, renderPID(item.Runtime.PID))
 	if selected {
-		row = selectionStyle.MaxWidth(width).Render(row)
+		row = selectedRowStyle.Width(width).MaxWidth(width).Render(row)
 	}
 	return row
 }
@@ -164,7 +172,11 @@ func groupedProcessRows(snapshot controller.Snapshot, projectIndex, processIndex
 	rows := make([]string, 0)
 	selectedLine := -1
 	for currentProject, project := range snapshot.Projects {
-		rows = append(rows, paneTitleStyle.Render(strings.ToUpper(project.Name)))
+		title := paneTitleStyle.Render(strings.ToUpper(project.Name))
+		if currentProject == projectIndex {
+			title = selectedRowStyle.Render("› " + strings.ToUpper(project.Name))
+		}
+		rows = append(rows, title)
 		for currentProcess, item := range project.Processes {
 			selected := currentProject == projectIndex && currentProcess == processIndex
 			if selected {
@@ -210,10 +222,22 @@ func renderAppHeader(snapshot controller.Snapshot, projectIndex, processIndex, w
 	return appHeaderStyle.Width(width).MaxHeight(1).Render(value + strings.Repeat(" ", gap) + counts)
 }
 
+func logPaneTitle(snapshot controller.Snapshot, projectIndex, processIndex int) string {
+	if projectIndex < 0 || projectIndex >= len(snapshot.Projects) {
+		return "LIVE LOG"
+	}
+	project := snapshot.Projects[projectIndex]
+	if processIndex < 0 || processIndex >= len(project.Processes) {
+		return "LIVE LOG · " + strings.ToUpper(project.Name)
+	}
+	return "LIVE LOG · " + strings.ToUpper(project.Name) + " / " + strings.ToUpper(project.Processes[processIndex].Name)
+}
+
 func renderDashboard(snapshot controller.Snapshot, projectIndex, processIndex int, preview string, width, height int) string {
 	geometry := dashboardLayout(width, height)
 	header := renderAppHeader(snapshot, projectIndex, processIndex, width)
 	footerLine := appFooterStyle.Width(width).MaxHeight(1).Render(footer(width))
+	logTitle := logPaneTitle(snapshot, projectIndex, processIndex)
 	var body string
 	switch geometry.mode {
 	case dashboardWide:
@@ -224,7 +248,7 @@ func renderDashboard(snapshot controller.Snapshot, projectIndex, processIndex in
 		body = lipgloss.JoinHorizontal(lipgloss.Top,
 			renderPane("PROJECTS", projects, geometry.projectWidth, geometry.bodyHeight),
 			renderPane("PROCESSES", processColumns(processWidth)+"\n"+processes, geometry.processWidth, geometry.bodyHeight),
-			renderPane("LIVE LOG", preview, geometry.logWidth, geometry.logHeight),
+			renderPane(logTitle, preview, geometry.logWidth, geometry.logHeight),
 		)
 	case dashboardMedium:
 		processWidth := max(geometry.processWidth-paneFrameWidth-2*paneHorizontalPadding, 1)
@@ -232,7 +256,7 @@ func renderDashboard(snapshot controller.Snapshot, projectIndex, processIndex in
 		processes := renderVisibleLines(rows, selectedLine, processWidth, max(geometry.processHeight-paneFrameWidth-2, 1))
 		body = lipgloss.JoinHorizontal(lipgloss.Top,
 			renderPane("PROCESSES", processColumns(processWidth)+"\n"+processes, geometry.processWidth, geometry.bodyHeight),
-			renderPane("LIVE LOG", preview, geometry.logWidth, geometry.logHeight),
+			renderPane(logTitle, preview, geometry.logWidth, geometry.logHeight),
 		)
 	default:
 		project := ""
@@ -243,7 +267,7 @@ func renderDashboard(snapshot controller.Snapshot, projectIndex, processIndex in
 		processes := renderVisibleLines(currentProcessRows(snapshot, projectIndex, processIndex, processWidth), processIndex, processWidth, max(geometry.processHeight-paneFrameWidth-2, 1))
 		body = lipgloss.JoinVertical(lipgloss.Left,
 			renderPane("PROCESSES"+project, processColumns(processWidth)+"\n"+processes, width, geometry.processHeight),
-			renderPane("LIVE LOG", preview, width, geometry.logHeight),
+			renderPane(logTitle, preview, width, geometry.logHeight),
 		)
 	}
 	return fitScreen(lipgloss.JoinVertical(lipgloss.Left, header, body, footerLine), width, height)

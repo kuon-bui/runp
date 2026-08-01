@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -23,7 +24,7 @@ func TestLoadMissingCreatesDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm()&0o077 != 0 {
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 		t.Fatalf("mode = %o", info.Mode().Perm())
 	}
 }
@@ -101,7 +102,12 @@ func TestSaveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if got.Version != cfg.Version {
 		t.Fatalf("loaded = %#v", got)
+	}
+
+	if err := config.Save(path, got); err != nil {
+		t.Fatalf("save after load: %v", err)
 	}
 }

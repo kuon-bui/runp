@@ -7,11 +7,18 @@ import (
 )
 
 func composeOverlay(background, foreground string, width, height int) string {
+	return composeOverlayIn(background, foreground, width, height, 0, 0, width, height)
+}
+
+func composeOverlayIn(background, foreground string, width, height, x, y, areaWidth, areaHeight int) string {
 	width, height = max(width, 1), max(height, 1)
 	background = fitScreen(background, width, height)
-	foreground = lipgloss.NewStyle().MaxWidth(width).MaxHeight(height).Render(foreground)
-	x := max((width-lipgloss.Width(foreground))/2, 0)
-	y := max((height-lipgloss.Height(foreground))/2, 0)
+	areaWidth, areaHeight = max(areaWidth, 1), max(areaHeight, 1)
+	foregroundWidth := min(lipgloss.Width(foreground), areaWidth)
+	foregroundHeight := min(lipgloss.Height(foreground), areaHeight)
+	x += max((areaWidth-foregroundWidth)/2, 0)
+	y += max((areaHeight-foregroundHeight)/2, 0)
+	foreground = lipgloss.NewStyle().MaxWidth(areaWidth).MaxHeight(areaHeight).Render(foreground)
 	canvas := lipgloss.NewCanvas(width, height)
 	canvas.Compose(lipgloss.NewCompositor(
 		lipgloss.NewLayer(background).Z(0),
@@ -100,5 +107,5 @@ func renderBusy() string {
 }
 
 func renderOperationError(err error) string {
-	return overlayStyle.Render(errorStyle.Render("ERROR") + "\n\n" + err.Error())
+	return overlayStyle.Render(errorStyle.Render("ERROR") + "\n\n" + err.Error() + "\n\n[Enter/Esc] Close")
 }
