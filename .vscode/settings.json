@@ -4,6 +4,8 @@
     "indegree",
     "lipgloss",
     "logstore",
+    "mapstructure",
+    "MOVEFILE",
     "procgroup",
     "runp",
     "textinput"

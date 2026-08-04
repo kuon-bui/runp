@@ -28,18 +28,14 @@ func stubProgram(t *testing.T) {
 	t.Cleanup(func() { runProgram = previous })
 }
 
-func TestRunCreatesMissingConfiguredFile(t *testing.T) {
+func TestRunAllowsMissingConfiguredFileWithoutCreatingIt(t *testing.T) {
 	stubProgram(t)
 	path := filepath.Join(t.TempDir(), "nested", "runp.json")
 	if err := Run(context.Background(), []string{"--config", path}, strings.NewReader(""), io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), `"version": 1`) {
-		t.Fatalf("config = %s", data)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("missing config created: %v", err)
 	}
 }
 
@@ -64,15 +60,35 @@ func TestRunRejectsUnknownFlagAndPositionals(t *testing.T) {
 	}
 }
 
-func TestRunUsesDefaultConfigPath(t *testing.T) {
+func TestRunAllowsMissingConfigInWorkingDirectory(t *testing.T) {
 	stubProgram(t)
 	configRoot, _ := setUserDirs(t)
+	userConfigPath := filepath.Join(configRoot, "runp", "config.json")
+	if err := os.MkdirAll(filepath.Dir(userConfigPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userConfigPath, []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	previousDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(directory); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previousDirectory) })
+
 	if err := Run(context.Background(), nil, strings.NewReader(""), io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(configRoot, "runp", "config.json")
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("default config: %v", err)
+	if _, err := os.Stat(filepath.Join(directory, ".runp.json")); !os.IsNotExist(err) {
+		t.Fatalf("missing local config created: %v", err)
+	}
+	data, err := os.ReadFile(userConfigPath)
+	if err != nil || string(data) != "{broken" {
+		t.Fatalf("user config changed: data=%q error=%v", data, err)
 	}
 }
 

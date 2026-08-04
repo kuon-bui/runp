@@ -4,14 +4,13 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
 	"runp/internal/config"
 )
 
-func TestLoadMissingCreatesDefault(t *testing.T) {
+func TestLoadMissingReturnsDefaultWithoutCreatingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "config.json")
 	got, err := config.Load(path)
 	if err != nil {
@@ -20,12 +19,35 @@ func TestLoadMissingCreatesDefault(t *testing.T) {
 	if got.Version != 1 || len(got.Projects) != 0 {
 		t.Fatalf("config = %#v", got)
 	}
-	info, err := os.Stat(path)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("missing config created: %v", err)
+	}
+}
+
+func TestCurrentPathUsesWorkingDirectoryWhenConfigMissing(t *testing.T) {
+	directory := t.TempDir()
+	previousDirectory, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
-		t.Fatalf("mode = %o", info.Mode().Perm())
+	if err := os.Chdir(directory); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previousDirectory) })
+
+	got, err := config.CurrentPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(directory, ".runp.json")
+	if got != want {
+		t.Fatalf("path = %q, want %q", got, want)
+	}
+	if err := config.Save(got, config.Default()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("saved config: %v", err)
 	}
 }
 
@@ -88,6 +110,11 @@ func TestSaveFailurePreservesExistingFile(t *testing.T) {
 func TestSaveRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	cfg := config.Default()
+	cfg.Projects = []config.Project{{
+		Name:      "app",
+		Directory: t.TempDir(),
+		Processes: []config.Process{{Name: "api", Command: "api", Env: map[string]string{"API_TOKEN": "secret"}}},
+	}}
 	if err := config.Save(path, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -105,6 +132,9 @@ func TestSaveRoundTrip(t *testing.T) {
 
 	if got.Version != cfg.Version {
 		t.Fatalf("loaded = %#v", got)
+	}
+	if got.Projects[0].Processes[0].Env["API_TOKEN"] != "secret" {
+		t.Fatalf("environment = %#v", got.Projects[0].Processes[0].Env)
 	}
 
 	if err := config.Save(path, got); err != nil {

@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"runtime/debug"
 	"time"
@@ -54,9 +53,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		*configPath = path
 	}
 
-	cfg, err := loadOrCreate(*configPath)
+	cfg, err := config.Load(*configPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("load config: %w", err)
 	}
 	dataDir, err := config.DataDir()
 	if err != nil {
@@ -110,19 +109,4 @@ func saveReplacement(path string, control *controller.Controller, current *confi
 	}
 	*current = next
 	return nil
-}
-
-func loadOrCreate(path string) (config.Config, error) {
-	cfg, err := config.Load(path)
-	if err == nil {
-		return cfg, nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return config.Config{}, fmt.Errorf("load config: %w", err)
-	}
-	cfg = config.Default()
-	if err := config.Save(path, cfg); err != nil {
-		return config.Config{}, fmt.Errorf("create config: %w", err)
-	}
-	return cfg, nil
 }
