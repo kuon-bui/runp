@@ -2,11 +2,13 @@ package config
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"regexp"
-	"strconv"
 	"strings"
+
+	"github.com/spf13/viper"
 )
 
 var envKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -17,54 +19,48 @@ const (
 )
 
 func ParseEnv(r io.Reader) (map[string]string, error) {
-	values := make(map[string]string)
-	scanner := bufio.NewScanner(r)
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+
+	keyNames := make(map[string]string)
+	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, initialEnvScanBuffer), maximumEnvLineBytes)
 	for lineNumber := 1; scanner.Scan(); lineNumber++ {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		if strings.HasPrefix(line, "export ") {
-			line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		if after, ok := strings.CutPrefix(line, "export "); ok {
+			line = strings.TrimSpace(after)
 		}
-		key, raw, ok := strings.Cut(line, "=")
+		key, _, ok := strings.Cut(line, "=")
 		key = strings.TrimSpace(key)
 		if !ok || !envKeyPattern.MatchString(key) {
 			return nil, fmt.Errorf("line %d: invalid environment assignment", lineNumber)
 		}
-		value, err := parseEnvValue(raw)
-		if err != nil {
-			return nil, fmt.Errorf("line %d: %w", lineNumber, err)
-		}
-		values[key] = value
+		keyNames[strings.ToLower(key)] = key
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-	return values, nil
-}
 
-func parseEnvValue(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", nil
+	dollarPlaceholder := "__RUNP_DOLLAR__"
+	for bytes.Contains(data, []byte(dollarPlaceholder)) {
+		dollarPlaceholder += "_"
 	}
-	if raw[0] == '\'' {
-		if len(raw) < 2 || raw[len(raw)-1] != '\'' {
-			return "", fmt.Errorf("unterminated single-quoted value")
-		}
-		return raw[1 : len(raw)-1], nil
+	data = bytes.ReplaceAll(data, []byte("$"), []byte(dollarPlaceholder))
+
+	v := viper.New()
+	v.SetConfigType("env")
+	if err := v.ReadConfig(bytes.NewReader(data)); err != nil {
+		return nil, err
 	}
-	if raw[0] == '"' {
-		if len(raw) < 2 || raw[len(raw)-1] != '"' {
-			return "", fmt.Errorf("unterminated double-quoted value")
-		}
-		value, err := strconv.Unquote(raw)
-		if err != nil {
-			return "", fmt.Errorf("invalid double-quoted value: %w", err)
-		}
-		return value, nil
+
+	values := make(map[string]string, len(v.AllKeys()))
+	for _, key := range v.AllKeys() {
+		values[keyNames[key]] = strings.ReplaceAll(v.GetString(key), dollarPlaceholder, "$")
 	}
-	return raw, nil
+	return values, nil
 }

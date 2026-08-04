@@ -16,7 +16,7 @@ Run with default config:
 runp
 ```
 
-When no `--config` is given, `runp` uses `.runp.json` from current working directory if present, then falls back to user config.
+When no `--config` is given, `runp` only uses `.runp.json` from current working directory.
 
 Use another config:
 
@@ -26,11 +26,10 @@ runp --config /path/to/config.json
 
 Default paths:
 
-- Local config: `<current working directory>/.runp.json`
-- Config: `<os.UserConfigDir()>/runp/config.json`
+- Config: `<current working directory>/.runp.json`
 - Logs: `<os.UserCacheDir()>/runp/logs/<project>/<process>.log`
 
-Missing config gets created with version 1 and no projects. Malformed or invalid existing config returns error without overwrite.
+Missing config starts with version 1 and no projects in memory. Saving creates it at selected path. Malformed or invalid existing config returns error without overwrite.
 
 ## Configuration
 

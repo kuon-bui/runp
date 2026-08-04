@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
+	"time"
+
+	"github.com/go-viper/mapstructure/v2"
+	"github.com/spf13/viper"
 )
 
 const (
@@ -21,21 +27,7 @@ func CurrentPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve working directory: %w", err)
 	}
-	path := filepath.Join(directory, localConfigName)
-	if _, err := os.Stat(path); err == nil {
-		return path, nil
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return "", fmt.Errorf("inspect local config: %w", err)
-	}
-	return DefaultPath()
-}
-
-func DefaultPath() (string, error) {
-	root, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve user config directory: %w", err)
-	}
-	return filepath.Join(root, "runp", "config.json"), nil
+	return filepath.Join(directory, localConfigName), nil
 }
 
 func DataDir() (string, error) {
@@ -49,11 +41,7 @@ func DataDir() (string, error) {
 func Load(path string) (Config, error) {
 	file, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		cfg := Default()
-		if err := Save(path, cfg); err != nil {
-			return Config{}, fmt.Errorf("create default config: %w", err)
-		}
-		return cfg, nil
+		return Default(), nil
 	}
 
 	if err != nil {
@@ -66,23 +54,61 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("secure config: %w", err)
 	}
 
-	decoder := json.NewDecoder(file)
-	decoder.DisallowUnknownFields()
-	var cfg Config
-	if err := decoder.Decode(&cfg); err != nil {
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return Config{}, fmt.Errorf("read config: %w", err)
+	}
+	v := viper.New()
+	v.SetConfigType("json")
+	if err := v.ReadConfig(bytes.NewReader(data)); err != nil {
 		return Config{}, fmt.Errorf("decode config: %w", err)
 	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return Config{}, fmt.Errorf("decode config: multiple JSON values")
+	var cfg Config
+	if err := v.UnmarshalExact(&cfg, viper.DecodeHook(decodeConfigValue), strictConfigDecode); err != nil {
+		return Config{}, fmt.Errorf("decode config: %w", err)
+	}
+	// ponytail: Viper lowercases nested map keys; remove when it supports case-sensitive map keys.
+	var original struct {
+		Projects []struct {
+			Processes []struct {
+				Env map[string]string `json:"env"`
+			} `json:"processes"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal(data, &original); err != nil {
+		return Config{}, fmt.Errorf("decode config: %w", err)
+	}
+	for projectIndex := range cfg.Projects {
+		for processIndex := range cfg.Projects[projectIndex].Processes {
+			cfg.Projects[projectIndex].Processes[processIndex].Env = original.Projects[projectIndex].Processes[processIndex].Env
 		}
-		return Config{}, fmt.Errorf("decode config trailing data: %w", err)
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, fmt.Errorf("validate config: %w", err)
 	}
 	return cfg, nil
+}
+
+func strictConfigDecode(config *mapstructure.DecoderConfig) {
+	config.WeaklyTypedInput = false
+}
+
+func decodeConfigValue(from, to reflect.Type, data any) (any, error) {
+	if to != reflect.TypeFor[Duration]() {
+		return data, nil
+	}
+	value, ok := data.(string)
+	if !ok {
+		return nil, fmt.Errorf("duration must be a string")
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return nil, fmt.Errorf("invalid duration %q: %w", value, err)
+	}
+	if parsed < 0 {
+		return nil, fmt.Errorf("duration must not be negative")
+	}
+	return Duration(parsed), nil
 }
 
 func Save(path string, cfg Config) (err error) {
