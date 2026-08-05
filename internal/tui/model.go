@@ -15,22 +15,23 @@ import (
 )
 
 type Services struct {
-	Snapshots      func() controller.Snapshot
-	RuntimeEvents  <-chan controller.Event
-	LogEvents      <-chan logstore.Event
-	LogSnapshot    func(string, string) []logstore.Record
-	LogQuery       func(string, string, logstore.Filter) []logstore.Record
-	ClearLog       func(string, string)
-	StartProcess   func(context.Context, string, string) error
-	StopProcess    func(context.Context, string, string) error
-	RestartProcess func(context.Context, string, string) error
-	StartProject   func(context.Context, string) error
-	StopProject    func(context.Context, string) error
-	RestartProject func(context.Context, string) error
-	Shutdown       func(context.Context) error
-	ForceShutdown  func(context.Context) error
-	Config         func() config.Config
-	SaveConfig     func(config.Config) error
+	Snapshots       func() controller.Snapshot
+	RuntimeEvents   <-chan controller.Event
+	LogEvents       <-chan logstore.Event
+	LogSnapshot     func(string, string) []logstore.Record
+	LogQuery        func(string, string, logstore.Filter) []logstore.Record
+	ClearLog        func(string, string)
+	StartProcess    func(context.Context, string, string) error
+	StopProcess     func(context.Context, string, string) error
+	RestartProcess  func(context.Context, string, string) error
+	StartProject    func(context.Context, string) error
+	StopProject     func(context.Context, string) error
+	RestartProject  func(context.Context, string) error
+	Shutdown        func(context.Context) error
+	ForceShutdown   func(context.Context) error
+	Config          func() config.Config
+	SaveConfig      func(config.Config) error
+	OpenProjectForm bool
 }
 
 type action uint8
@@ -88,6 +89,11 @@ func New(services Services) Model {
 	}
 	model.refresh()
 	model.refreshPreview()
+	if services.OpenProjectForm {
+		if err := model.openProjectForm(-1); err != nil {
+			model.err = err
+		}
+	}
 	return model
 }
 

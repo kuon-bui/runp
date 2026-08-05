@@ -155,6 +155,27 @@ func TestAutostart(t *testing.T) {
 	assertManagerState(t, manager, "all", "api", process.Running)
 }
 
+func TestStartConfiguredProjectOnlyStartsItsAutostartProcesses(t *testing.T) {
+	dir := t.TempDir()
+	db := controllerProcess("db")
+	db.Autostart = true
+	other := controllerProcess("worker")
+	other.Autostart = true
+	control, manager := newTestController(t,
+		config.Project{Name: "shop", Directory: dir, Processes: []config.Process{db, controllerProcess("api")}},
+		config.Project{Name: "tools", Directory: dir, Processes: []config.Process{other}},
+	)
+	if err := control.StartConfiguredProject(context.Background(), "shop"); err != nil {
+		t.Fatal(err)
+	}
+	assertManagerState(t, manager, "shop", "db", process.Running)
+	for _, key := range []process.Key{{Project: "shop", Process: "api"}, {Project: "tools", Process: "worker"}} {
+		if _, ok := manager.Snapshot(key); ok {
+			t.Fatalf("non-selected autostart process started: %#v", key)
+		}
+	}
+}
+
 func TestStartProjectStartsIndependentLevelConcurrently(t *testing.T) {
 	dir := t.TempDir()
 	dbMarker := filepath.Join(dir, "db.started")

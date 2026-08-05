@@ -218,6 +218,36 @@ func TestRunReturnsProgramError(t *testing.T) {
 	}
 }
 
+func TestStartPromptDefaultsToAutostart(t *testing.T) {
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop"}, {Name: "tools"}}
+	model, cmd := (&startPrompt{cfg: cfg}).Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil || model.(*startPrompt).choice != (startChoice{}) {
+		t.Fatalf("choice = %#v, cmd = %v", model.(*startPrompt).choice, cmd)
+	}
+}
+
+func TestStartPromptSelectsOneProject(t *testing.T) {
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop"}, {Name: "tools"}}
+	model := &startPrompt{cfg: cfg}
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	updated, _ = updated.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	updated, _ = updated.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	updated, cmd := updated.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil || updated.(*startPrompt).choice.project != "tools" {
+		t.Fatalf("choice = %#v, cmd = %v", updated.(*startPrompt).choice, cmd)
+	}
+}
+
+func TestStartPromptCreatesProjectWhenConfigEmpty(t *testing.T) {
+	updated, _ := (&startPrompt{cfg: config.Default()}).Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	updated, cmd := updated.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil || !updated.(*startPrompt).choice.createProject {
+		t.Fatalf("choice = %#v, cmd = %v", updated.(*startPrompt).choice, cmd)
+	}
+}
+
 func TestRunValidatesReplacementBeforeSaving(t *testing.T) {
 	root := t.TempDir()
 	projectDir := filepath.Join(root, "project")
