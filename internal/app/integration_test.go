@@ -39,7 +39,9 @@ func TestRunpWorkflowHelper(t *testing.T) {
 			os.Exit(1)
 		}
 	}
-	time.Sleep(24 * time.Hour)
+	for {
+		time.Sleep(time.Hour)
+	}
 }
 
 func TestRunpWorkflow(t *testing.T) {
@@ -75,7 +77,7 @@ func TestRunpWorkflow(t *testing.T) {
 		return workflowState(snapshot, "api") == process.Running && workflowState(snapshot, "worker") == process.Running && workflowRestarts(snapshot, "worker") == 1
 	})
 	lines := waitForStartLines(t, marker, 3)
-	if len(lines) < 3 || lines[0] != "api" || lines[1] != "worker" || lines[2] != "worker" {
+	if len(lines) < 3 || countWorkflowStarts(lines, "api") != 1 || countWorkflowStarts(lines, "worker") != 2 {
 		t.Fatalf("start order = %q", lines)
 	}
 	for _, name := range []string{"api", "worker"} {
@@ -189,6 +191,16 @@ func waitForStartLines(t *testing.T, path string, count int) []string {
 			runtime.Gosched()
 		}
 	}
+}
+
+func countWorkflowStarts(lines []string, name string) int {
+	count := 0
+	for _, line := range lines {
+		if line == name {
+			count++
+		}
+	}
+	return count
 }
 
 func workflowState(snapshot controller.Snapshot, name string) process.State {

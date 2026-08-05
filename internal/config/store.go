@@ -49,7 +49,7 @@ func Load(path string) (Config, error) {
 	}
 	defer file.Close()
 
-	err = os.Chmod(path, configFileMode)
+	err = file.Chmod(configFileMode)
 	if err != nil {
 		return Config{}, fmt.Errorf("secure config: %w", err)
 	}

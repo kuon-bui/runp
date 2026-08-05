@@ -39,6 +39,10 @@ func TestCurrentPathUsesWorkingDirectoryWhenConfigMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	directory, err = os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := filepath.Join(directory, ".runp.json")
 	if got != want {
 		t.Fatalf("path = %q, want %q", got, want)
