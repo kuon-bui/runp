@@ -175,8 +175,8 @@ func TestDashboardFooterKeepsAllActionKeysVisible(t *testing.T) {
 		width int
 		want  []string
 	}{
-		{width: 60, want: []string{"Enter Log", "s k r c g a e q"}},
-		{width: 120, want: []string{"Enter Log", "s Start", "k Stop", "r Restart", "c Clear log", "g Project", "a Add", "e Edit", "q Quit"}},
+		{width: 60, want: []string{"Enter Log", "s k r c g a e d q"}},
+		{width: 120, want: []string{"Enter Log", "s Start", "k Stop", "r Restart", "c Clear log", "g Project", "a Add", "e Edit", "d Delete", "q Quit"}},
 	}
 	for _, test := range tests {
 		model := tui.New(tui.Services{Snapshots: dashboardFixture})
@@ -358,6 +358,117 @@ func TestProjectActionMenu(t *testing.T) {
 	_ = cmd()
 	if calls != 1 {
 		t.Fatalf("calls = %d", calls)
+	}
+}
+
+func TestDeleteProcessStopsThenSavesAndRemovesDependencies(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{
+		Name:      "shop",
+		Directory: dir,
+		Processes: []config.Process{
+			{Name: "api", Command: "api"},
+			{Name: "web", Command: "web", DependsOn: []string{"api"}},
+		},
+	}}
+	calls := []string{}
+	model := tui.New(tui.Services{
+		Snapshots: func() controller.Snapshot {
+			return controller.Snapshot{Projects: []controller.ProjectSnapshot{{
+				Name: "shop",
+				Processes: []controller.ProcessSnapshot{
+					{Name: "api", Runtime: process.Snapshot{State: process.Running}},
+					{Name: "web", DependsOn: []string{"api"}, Runtime: process.Snapshot{State: process.Running}},
+				},
+			}}}
+		},
+		Config: func() config.Config { return cfg },
+		StopProcess: func(_ context.Context, project, name string) error {
+			calls = append(calls, "stop "+project+"/"+name)
+			return nil
+		},
+		SaveConfig: func(got config.Config) error {
+			calls = append(calls, "save")
+			cfg = got
+			return nil
+		},
+	})
+	pending, cmd := model.Update(tea.KeyPressMsg{Code: 'd'})
+	if cmd != nil || !strings.Contains(pending.(tui.Model).View().Content, "CONFIRM DELETE PROCESS") {
+		t.Fatal("process delete confirmation missing")
+	}
+	confirmed, cmd := pending.(tui.Model).Update(tea.KeyPressMsg{Code: 'y'})
+	if cmd == nil {
+		t.Fatal("process delete command missing")
+	}
+	_, _ = confirmed.(tui.Model).Update(cmd())
+	if strings.Join(calls, ",") != "stop shop/api,save" {
+		t.Fatalf("calls = %#v", calls)
+	}
+	if len(cfg.Projects[0].Processes) != 1 || cfg.Projects[0].Processes[0].Name != "web" || len(cfg.Projects[0].Processes[0].DependsOn) != 0 {
+		t.Fatalf("config = %#v", cfg)
+	}
+}
+
+func TestDeleteProjectStopsThenSaves(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: dir}, {Name: "tools", Directory: dir}}
+	calls := []string{}
+	model := tui.New(tui.Services{
+		Snapshots: func() controller.Snapshot {
+			return controller.Snapshot{Projects: []controller.ProjectSnapshot{{Name: "shop"}, {Name: "tools"}}}
+		},
+		Config: func() config.Config { return cfg },
+		StopProject: func(_ context.Context, name string) error {
+			calls = append(calls, "stop "+name)
+			return nil
+		},
+		SaveConfig: func(got config.Config) error {
+			calls = append(calls, "save")
+			cfg = got
+			return nil
+		},
+	})
+	menu, _ := model.Update(tea.KeyPressMsg{Code: 'g'})
+	pending, cmd := menu.(tui.Model).Update(tea.KeyPressMsg{Code: 'd'})
+	if cmd != nil || !strings.Contains(pending.(tui.Model).View().Content, "CONFIRM DELETE PROJECT") {
+		t.Fatal("project delete confirmation missing")
+	}
+	confirmed, cmd := pending.(tui.Model).Update(tea.KeyPressMsg{Code: 'y'})
+	if cmd == nil {
+		t.Fatal("project delete command missing")
+	}
+	_, _ = confirmed.(tui.Model).Update(cmd())
+	if strings.Join(calls, ",") != "stop shop,save" {
+		t.Fatalf("calls = %#v", calls)
+	}
+	if len(cfg.Projects) != 1 || cfg.Projects[0].Name != "tools" {
+		t.Fatalf("config = %#v", cfg)
+	}
+}
+
+func TestDeleteStopFailurePreventsSave(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Projects = []config.Project{{Name: "shop", Directory: dir, Processes: []config.Process{{Name: "api", Command: "api"}}}}
+	saves := 0
+	model := tui.New(tui.Services{
+		Snapshots: func() controller.Snapshot {
+			return controller.Snapshot{Projects: []controller.ProjectSnapshot{{Name: "shop", Processes: []controller.ProcessSnapshot{{Name: "api"}}}}}
+		},
+		Config: func() config.Config { return cfg },
+		StopProcess: func(context.Context, string, string) error {
+			return fmt.Errorf("stop failed")
+		},
+		SaveConfig: func(config.Config) error { saves++; return nil },
+	})
+	pending, _ := model.Update(tea.KeyPressMsg{Code: 'd'})
+	confirmed, cmd := pending.(tui.Model).Update(tea.KeyPressMsg{Code: 'y'})
+	finished, _ := confirmed.(tui.Model).Update(cmd())
+	if saves != 0 || !strings.Contains(finished.(tui.Model).View().Content, "stop failed") {
+		t.Fatalf("saves/view = %d/%q", saves, finished.(tui.Model).View().Content)
 	}
 }
 

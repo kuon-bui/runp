@@ -141,6 +141,7 @@ Dashboard:
 - `g`: project start/stop/restart/edit menu
 - `a`: add project/process
 - `e`: edit selected process
+- `d`: delete selected process; project menu `d` deletes selected project
 - `q` or `Ctrl+C`: quit; active processes require confirmation
 
 Log viewer:

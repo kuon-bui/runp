@@ -29,7 +29,7 @@ func composeOverlayIn(background, foreground string, width, height, x, y, areaWi
 
 func renderProjectMenu() string {
 	return overlayStyle.Render(overlayTitleStyle.Render("PROJECT ACTIONS") +
-		"\n\n[s] Start  [k] Stop  [r] Restart  [e] Edit\n[Esc] Cancel")
+		"\n\n[s] Start  [k] Stop  [r] Restart  [e] Edit  [d] Delete\n[Esc] Cancel")
 }
 
 func renderAddMenu(selected int) string {
@@ -50,7 +50,7 @@ func renderShortcuts() string {
 	dashboard := renderShortcutSection("DASHBOARD", `[↑↓/←→] Move
 [Enter] Open logs
 [s/k/r] Start / Stop / Restart
-[g/a/e] Project menu / Add / Edit
+[g/a/e/d] Project menu / Add / Edit / Delete process
 [?] Open or close shortcuts
 [q/Ctrl+C] Quit`)
 	logs := renderShortcutSection("LOGS & SEARCH", `[Esc] Back
@@ -66,7 +66,7 @@ func renderShortcuts() string {
 [Enter] Set environment
 [Ctrl+X] Delete environment`)
 	menus := renderShortcutSection("MENUS & CONFIRM", `[s/k/r] Start / Stop / Restart project
-[e] Edit project
+[e/d] Edit / Delete project
 [p] Add project
 [o] Add process
 [Esc/g/a] Close menu
@@ -96,6 +96,10 @@ func renderConfirmation(current action) string {
 		name = "CLEAR LOG"
 	case saveCritical:
 		name = "SAVE AND RESTART"
+	case deleteProcess:
+		name = "DELETE PROCESS"
+	case deleteProject:
+		name = "DELETE PROJECT"
 	}
 	return overlayStyle.Render(confirmTitleStyle.Render("CONFIRM "+name) +
 		"\n\n[y] Yes  [n/Esc] No")

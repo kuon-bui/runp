@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 
 	tea "charm.land/bubbletea/v2"
@@ -46,6 +47,8 @@ const (
 	clearLog
 	saveConfig
 	saveCritical
+	deleteProcess
+	deleteProject
 )
 
 type Model struct {
@@ -243,6 +246,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err := m.openProjectForm(m.projectIndex); err != nil {
 					m.err = err
 				}
+			case 'd':
+				m.projectMenu = false
+				m.pending = deleteProject
 			case tea.KeyEscape, 'g':
 				m.projectMenu = false
 			}
@@ -315,6 +321,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err := m.openProcessForm(m.processIndex); err != nil {
 				m.err = err
 			}
+		case 'd':
+			m.pending = deleteProcess
 		case tea.KeyEnter:
 			project, name, ok := m.selected()
 			if ok {
@@ -534,9 +542,87 @@ func (m Model) actionCommand(pending action) tea.Cmd {
 			}
 			return nil
 		})
+	case deleteProcess:
+		if !selected || m.services.Config == nil || m.services.SaveConfig == nil || m.services.StopProcess == nil {
+			return func() tea.Msg {
+				return operationDoneMsg{action: pending, err: errors.New("process delete unavailable")}
+			}
+		}
+		return operationCommand(pending, func(ctx context.Context) error {
+			if err := m.services.StopProcess(ctx, project, name); err != nil {
+				return err
+			}
+			cfg, err := removeProcess(m.services.Config(), project, name)
+			if err != nil {
+				return err
+			}
+			return m.services.SaveConfig(cfg)
+		})
+	case deleteProject:
+		if selectedProject == "" || m.services.Config == nil || m.services.SaveConfig == nil || m.services.StopProject == nil {
+			return func() tea.Msg {
+				return operationDoneMsg{action: pending, err: errors.New("project delete unavailable")}
+			}
+		}
+		return operationCommand(pending, func(ctx context.Context) error {
+			if err := m.services.StopProject(ctx, selectedProject); err != nil {
+				return err
+			}
+			cfg, err := removeProject(m.services.Config(), selectedProject)
+			if err != nil {
+				return err
+			}
+			return m.services.SaveConfig(cfg)
+		})
 	default:
 		return nil
 	}
+}
+
+func removeProcess(cfg config.Config, project, name string) (config.Config, error) {
+	next, err := cloneConfig(cfg)
+	if err != nil {
+		return config.Config{}, err
+	}
+	for projectIndex := range next.Projects {
+		if next.Projects[projectIndex].Name != project {
+			continue
+		}
+		items := next.Projects[projectIndex].Processes
+		for processIndex := range items {
+			if items[processIndex].Name != name {
+				continue
+			}
+			next.Projects[projectIndex].Processes = append(items[:processIndex], items[processIndex+1:]...)
+			for remainingIndex := range next.Projects[projectIndex].Processes {
+				dependencies := next.Projects[projectIndex].Processes[remainingIndex].DependsOn
+				kept := dependencies[:0]
+				for _, dependency := range dependencies {
+					if dependency != name {
+						kept = append(kept, dependency)
+					}
+				}
+				next.Projects[projectIndex].Processes[remainingIndex].DependsOn = kept
+			}
+			return next, nil
+		}
+		return config.Config{}, fmt.Errorf("project %q has no process %q", project, name)
+	}
+	return config.Config{}, fmt.Errorf("project %q not found", project)
+}
+
+func removeProject(cfg config.Config, name string) (config.Config, error) {
+	next, err := cloneConfig(cfg)
+	if err != nil {
+		return config.Config{}, err
+	}
+	for index := range next.Projects {
+		if next.Projects[index].Name == name {
+			next.Projects = append(next.Projects[:index], next.Projects[index+1:]...)
+			return next, nil
+		}
+	}
+	return config.Config{}, fmt.Errorf("project %q not found", name)
 }
 
 func operationCommand(action action, call func(context.Context) error) tea.Cmd {
