@@ -136,14 +136,32 @@ func (c *Controller) Start(ctx context.Context) error {
 	c.mu.RUnlock()
 	var result error
 	for _, project := range projects {
-		if project.Autostart {
-			result = errors.Join(result, c.StartProject(ctx, project.Name))
-			continue
+		result = errors.Join(result, c.StartConfiguredProject(ctx, project.Name))
+	}
+	return result
+}
+
+func (c *Controller) StartConfiguredProject(ctx context.Context, name string) error {
+	c.mu.RLock()
+	var selected *config.Project
+	for index := range c.cfg.Projects {
+		if c.cfg.Projects[index].Name == name {
+			project := c.cfg.Projects[index]
+			selected = &project
+			break
 		}
-		for _, item := range project.Processes {
-			if item.Autostart {
-				result = errors.Join(result, c.StartProcess(ctx, project.Name, item.Name))
-			}
+	}
+	c.mu.RUnlock()
+	if selected == nil {
+		return fmt.Errorf("project %q not found", name)
+	}
+	if selected.Autostart {
+		return c.StartProject(ctx, name)
+	}
+	var result error
+	for _, item := range selected.Processes {
+		if item.Autostart {
+			result = errors.Join(result, c.StartProcess(ctx, name, item.Name))
 		}
 	}
 	return result

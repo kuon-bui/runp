@@ -31,6 +31,9 @@ Default paths:
 
 Missing config starts with version 1 and no projects in memory. Saving creates it at selected path. Malformed or invalid existing config returns error without overwrite.
 
+When `runp` starts in an interactive terminal, startup shows a keyboard UI to apply autostart rules to all projects or one selected project. Only projects and processes configured with `autostart: true` start.
+If no project exists and `One project` is selected, `runp` opens the create-project form.
+
 ## Configuration
 
 ```json
