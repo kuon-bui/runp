@@ -102,6 +102,9 @@ func TestWaitReturnsSameResultToAllCallers(t *testing.T) {
 
 	first := group.Wait()
 	second := group.Wait()
+	if first == nil || second == nil {
+		t.Fatalf("wait errors = %v, %v; want two exit failures", first, second)
+	}
 	if fmt.Sprint(first) != fmt.Sprint(second) {
 		t.Fatalf("wait errors = %v, %v", first, second)
 	}
