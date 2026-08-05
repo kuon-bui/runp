@@ -39,7 +39,7 @@ func TestCurrentPathUsesWorkingDirectoryWhenConfigMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	directory, err = filepath.EvalSymlinks(directory)
+	directory, err = os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
